@@ -20,10 +20,11 @@ def sigmoid(x):
 
 
 class Exhaustion:
-    """Tracks team rest days and fatigue"""
+    """Tracks team rest days and fatigue with hockey-specific factors"""
     def __init__(self):
         self.team_rest = {}
-
+        self.team_games = defaultdict(list)  # Track game history for road trip detection
+        
     def add_game(self, current):
         date = current['Date']
         home_id = current['HID']
@@ -31,6 +32,37 @@ class Exhaustion:
         
         self.team_rest[home_id] = date
         self.team_rest[away_id] = date
+        
+        # Track game location for road trip analysis
+        self.team_games[home_id].append({'date': date, 'is_home': True})
+        self.team_games[away_id].append({'date': date, 'is_home': False})
+        
+        # Keep only last 20 games for efficiency
+        if len(self.team_games[home_id]) > 20:
+            self.team_games[home_id] = self.team_games[home_id][-20:]
+        if len(self.team_games[away_id]) > 20:
+            self.team_games[away_id] = self.team_games[away_id][-20:]
+
+    def _get_road_trip_factor(self, team_id, current_date):
+        """Calculate road trip fatigue - 3+ consecutive away games increases fatigue"""
+        if team_id not in self.team_games or len(self.team_games[team_id]) < 2:
+            return 0.0
+        
+        # Count consecutive away games
+        consecutive_away = 0
+        for game in reversed(self.team_games[team_id][-10:]):
+            if (current_date - game['date']).days <= 14:  # Within last 2 weeks
+                if not game['is_home']:
+                    consecutive_away += 1
+                else:
+                    break
+        
+        # Penalize teams on long road trips (3+ away games)
+        if consecutive_away >= 3:
+            return -0.5
+        elif consecutive_away >= 2:
+            return -0.3
+        return 0.0
 
     def get_input_data(self, home_id, away_id, date):
         if home_id not in self.team_rest or away_id not in self.team_rest:
@@ -39,11 +71,23 @@ class Exhaustion:
         home_days = (date - self.team_rest[home_id]).days
         away_days = (date - self.team_rest[away_id]).days
         
+        # Back-to-back penalty (major fatigue factor in NHL)
         factor = 0.0
-        if home_days <= 1:
-            factor += 1.0
-        if away_days <= 1:
-            factor -= 1.0
+        if home_days == 0:  # Back-to-back for home team
+            factor += 1.5
+        elif home_days == 1:
+            factor += 0.8
+            
+        if away_days == 0:  # Back-to-back for away team
+            factor -= 1.5
+        elif away_days == 1:
+            factor -= 0.8
+        
+        # Road trip fatigue
+        home_road_factor = self._get_road_trip_factor(home_id, date)
+        away_road_factor = self._get_road_trip_factor(away_id, date)
+        
+        factor += home_road_factor - away_road_factor
         
         return [factor]
 
@@ -67,6 +111,8 @@ class HockeyFourFactor:
             'Saves': 0,
             'FaceoffsWon': 0,
             'Hits': 0,
+            'Blocks': 0,
+            'BlockedShots': 0,
             'Weight': 0
         }
         
@@ -80,6 +126,8 @@ class HockeyFourFactor:
             totals['Saves'] += stat['Saves'] * weight
             totals['FaceoffsWon'] += stat['FaceoffsWon'] * weight
             totals['Hits'] += stat['Hits'] * weight
+            totals['Blocks'] += stat['Blocks'] * weight
+            totals['BlockedShots'] += stat['BlockedShots'] * weight
             totals['Weight'] += weight
         
         return totals
@@ -105,7 +153,9 @@ class HockeyFourFactor:
             'PowerPlayGoals': current.get('H_PPG', 0) if not pd.isna(current.get('H_PPG', 0)) else 0,
             'Saves': current.get('H_SV', 0) if not pd.isna(current.get('H_SV', 0)) else 0,
             'FaceoffsWon': current.get('H_FO', 0) if not pd.isna(current.get('H_FO', 0)) else 0,
-            'Hits': current.get('H_HIT', 0) if not pd.isna(current.get('H_HIT', 0)) else 0
+            'Hits': current.get('H_HIT', 0) if not pd.isna(current.get('H_HIT', 0)) else 0,
+            'Blocks': current.get('H_BLK', 0) if not pd.isna(current.get('H_BLK', 0)) else 0,
+            'BlockedShots': current.get('H_BLK_S', 0) if not pd.isna(current.get('H_BLK_S', 0)) else 0
         })
         
         # Add away team stats - handle NaN by filling with 0
@@ -117,7 +167,9 @@ class HockeyFourFactor:
             'PowerPlayGoals': current.get('A_PPG', 0) if not pd.isna(current.get('A_PPG', 0)) else 0,
             'Saves': current.get('A_SV', 0) if not pd.isna(current.get('A_SV', 0)) else 0,
             'FaceoffsWon': current.get('A_FO', 0) if not pd.isna(current.get('A_FO', 0)) else 0,
-            'Hits': current.get('A_HIT', 0) if not pd.isna(current.get('A_HIT', 0)) else 0
+            'Hits': current.get('A_HIT', 0) if not pd.isna(current.get('A_HIT', 0)) else 0,
+            'Blocks': current.get('A_BLK', 0) if not pd.isna(current.get('A_BLK', 0)) else 0,
+            'BlockedShots': current.get('A_BLK_S', 0) if not pd.isna(current.get('A_BLK_S', 0)) else 0
         })
         
         # Opponent stats (for defense) - handle NaN by filling with 0
@@ -129,7 +181,9 @@ class HockeyFourFactor:
             'PowerPlayGoals': current.get('H_PPG', 0) if not pd.isna(current.get('H_PPG', 0)) else 0,
             'Saves': current.get('H_SV', 0) if not pd.isna(current.get('H_SV', 0)) else 0,
             'FaceoffsWon': current.get('H_FO', 0) if not pd.isna(current.get('H_FO', 0)) else 0,
-            'Hits': current.get('H_HIT', 0) if not pd.isna(current.get('H_HIT', 0)) else 0
+            'Hits': current.get('H_HIT', 0) if not pd.isna(current.get('H_HIT', 0)) else 0,
+            'Blocks': current.get('H_BLK', 0) if not pd.isna(current.get('H_BLK', 0)) else 0,
+            'BlockedShots': current.get('H_BLK_S', 0) if not pd.isna(current.get('H_BLK_S', 0)) else 0
         })
         
         self.opponent_stats_average[current['HID']].append({
@@ -140,7 +194,9 @@ class HockeyFourFactor:
             'PowerPlayGoals': current.get('A_PPG', 0) if not pd.isna(current.get('A_PPG', 0)) else 0,
             'Saves': current.get('A_SV', 0) if not pd.isna(current.get('A_SV', 0)) else 0,
             'FaceoffsWon': current.get('A_FO', 0) if not pd.isna(current.get('A_FO', 0)) else 0,
-            'Hits': current.get('A_HIT', 0) if not pd.isna(current.get('A_HIT', 0)) else 0
+            'Hits': current.get('A_HIT', 0) if not pd.isna(current.get('A_HIT', 0)) else 0,
+            'Blocks': current.get('A_BLK', 0) if not pd.isna(current.get('A_BLK', 0)) else 0,
+            'BlockedShots': current.get('A_BLK_S', 0) if not pd.isna(current.get('A_BLK_S', 0)) else 0
         })
 
     def _get_team_input_data(self, team_id, date):
@@ -153,19 +209,44 @@ class HockeyFourFactor:
         if stats['Weight'] < 0.01 or opp_stats['Weight'] < 0.01:
             return None
         
-        # Hockey-specific factors with safe division
+        # Hockey-specific metrics with safe division
+        # Shooting percentage (goals/shots)
         shooting_pct = stats['Goals'] / max(stats['ShotsOnGoal'], 0.1)
+        
+        # Save percentage (saves/opponent shots)
         save_pct = stats['Saves'] / max(opp_stats['ShotsOnGoal'], 0.1)
+        
+        # Power play efficiency (PP goals per opponent penalty)
         pp_efficiency = stats['PowerPlayGoals'] / max(opp_stats['Penalties'], 0.1)
+        
+        # Penalty kill success rate (1 - opponent PP goals per own penalties)
+        pk_success = 1.0 - (opp_stats['PowerPlayGoals'] / max(stats['Penalties'], 0.1))
+        
+        # Faceoff win percentage
         faceoff_pct = stats['FaceoffsWon'] / max(stats['FaceoffsWon'] + opp_stats['FaceoffsWon'], 0.1)
+        
+        # Corsi-like metric: shot attempts (SOG + blocked shots)
+        corsi_for = stats['ShotsOnGoal'] + stats['BlockedShots']
+        corsi_against = opp_stats['ShotsOnGoal'] + opp_stats['BlockedShots']
+        corsi_pct = corsi_for / max(corsi_for + corsi_against, 0.1)
+        
+        # Shot differential per game
+        shot_diff = (stats['ShotsOnGoal'] - opp_stats['ShotsOnGoal']) / stats['Weight']
+        
+        # Goals for/against per game
+        goals_for = stats['Goals'] / stats['Weight']
+        goals_against = opp_stats['Goals'] / opp_stats['Weight']
         
         return [
             shooting_pct,
             save_pct,
             pp_efficiency,
+            pk_success,
             faceoff_pct,
-            stats['Goals'] / stats['Weight'],
-            opp_stats['Goals'] / opp_stats['Weight']
+            corsi_pct,
+            shot_diff,
+            goals_for,
+            goals_against
         ]
 
     def get_input_data(self, home_id, away_id, date):
@@ -350,36 +431,46 @@ class NateSilverElo:
         away_id = current['AID']
         home_score = current['HS']
         away_score = current['AS']
+        is_ot_or_so = current.get('Special', '') in ['OT', 'PS', 'SO']
         
         if season > self.last_season:
             self.last_season = season
             self._new_season()
         
-        home_prediction = self._win_probability(self.elo_map[home_id] + 50 - self.elo_map[away_id])
+        # Home ice advantage ~55% in NHL (lower than basketball)
+        home_prediction = self._win_probability(self.elo_map[home_id] + 35 - self.elo_map[away_id])
         away_prediction = 1 - home_prediction
         
-        k_factor = self.get_k_factor(home_score - away_score, self.elo_map[home_id] + 50, self.elo_map[away_id])
+        k_factor = self.get_k_factor(home_score - away_score, self.elo_map[home_id] + 35, self.elo_map[away_id])
         
-        self.elo_map[home_id] += k_factor * (current['H'] - home_prediction)
-        self.elo_map[away_id] += k_factor * (current['A'] - away_prediction)
+        # Reduce rating change for OT/SO wins (they indicate evenly matched teams)
+        ot_so_multiplier = 0.7 if is_ot_or_so else 1.0
+        
+        self.elo_map[home_id] += k_factor * ot_so_multiplier * (current['H'] - home_prediction)
+        self.elo_map[away_id] += k_factor * ot_so_multiplier * (current['A'] - away_prediction)
 
     def get_input_data(self, home_id, away_id, season):
         if season > self.last_season:
             self.last_season = season
             self._new_season()
         
-        return [self.elo_map[home_id] - self.elo_map[away_id] + 50]
+        return [self.elo_map[home_id] - self.elo_map[away_id] + 35]
 
     def get_k_factor(self, score_difference, elo_home, elo_away):
-        if score_difference > 0:
-            return 20 * (abs(score_difference) + 3) ** 0.8 / (7.5 + 0.006 * (elo_home - elo_away))
+        # Lower K-factor for hockey (35-40 vs basketball's 50-60)
+        # Cap margin-of-victory at 3 goals (garbage time goals don't matter)
+        capped_diff = max(-3, min(3, score_difference))
+        
+        if capped_diff > 0:
+            return 15 * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_home - elo_away))
         else:
-            return 20 * (abs(score_difference) + 3) ** 0.8 / (7.5 + 0.006 * (elo_away - elo_home))
+            return 15 * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_away - elo_home))
 
 
 class Pythagorean:
-    """Pythagorean expectation adapted for hockey"""
-    def __init__(self, power=2.0, regularization=20, daily_decay=0.992):
+    """Pythagorean expectation adapted for hockey with linear/low exponent"""
+    def __init__(self, power=1.0, regularization=20, daily_decay=0.992):
+        # Hockey uses lower exponent (1.0-1.8) due to lower scoring variance
         self.power = power
         self.regularization = regularization
         self.daily_decay = daily_decay
@@ -410,6 +501,84 @@ class Pythagorean:
         ]
 
 
+class PoissonGoalModel:
+    """Poisson model for goal prediction - hockey goals as independent Poisson processes"""
+    def __init__(self, regularization=3.0, daily_decay=0.992):
+        self.regularization = regularization
+        self.daily_decay = daily_decay
+        self.team_scoring_rates = defaultdict(list)
+        self.team_defensive_rates = defaultdict(list)
+
+    def add_game(self, current):
+        date = current['Date']
+        home_id = current['HID']
+        away_id = current['AID']
+        home_score = current['HS']
+        away_score = current['AS']
+        
+        # Track scoring rates
+        self.team_scoring_rates[home_id].append([date, home_score])
+        self.team_scoring_rates[away_id].append([date, away_score])
+        
+        # Track defensive rates (goals allowed)
+        self.team_defensive_rates[home_id].append([date, away_score])
+        self.team_defensive_rates[away_id].append([date, home_score])
+        
+        # Keep last 100 games for efficiency
+        if len(self.team_scoring_rates[home_id]) > 100:
+            self.team_scoring_rates[home_id] = self.team_scoring_rates[home_id][-100:]
+            self.team_defensive_rates[home_id] = self.team_defensive_rates[home_id][-100:]
+        if len(self.team_scoring_rates[away_id]) > 100:
+            self.team_scoring_rates[away_id] = self.team_scoring_rates[away_id][-100:]
+            self.team_defensive_rates[away_id] = self.team_defensive_rates[away_id][-100:]
+
+    def _get_weighted_rate(self, team_id, date, is_offensive=True):
+        """Calculate time-weighted goal rate"""
+        if team_id not in self.team_scoring_rates:
+            return None
+        
+        data = self.team_scoring_rates[team_id] if is_offensive else self.team_defensive_rates[team_id]
+        
+        if len(data) < 5:
+            return None
+        
+        weighted_goals = 0.0
+        total_weight = 0.0
+        
+        for game_date, goals in data[-50:]:
+            weight = self.daily_decay ** abs((date - game_date).days)
+            weighted_goals += goals * weight
+            total_weight += weight
+        
+        if total_weight < 0.01:
+            return None
+        
+        return weighted_goals / total_weight
+
+    def get_input_data(self, home_id, away_id, date):
+        """Return expected goal differential based on Poisson model"""
+        # Home team offensive rate adjusted by away team defensive rate
+        home_off = self._get_weighted_rate(home_id, date, is_offensive=True)
+        away_def = self._get_weighted_rate(away_id, date, is_offensive=False)
+        
+        # Away team offensive rate adjusted by home team defensive rate
+        away_off = self._get_weighted_rate(away_id, date, is_offensive=True)
+        home_def = self._get_weighted_rate(home_id, date, is_offensive=False)
+        
+        if any(x is None for x in [home_off, away_def, away_off, home_def]):
+            return None
+        
+        # League average is around 3.0 goals per game in NHL
+        league_avg = 3.0
+        
+        # Expected goals for each team (adjusted by opponent's defense)
+        expected_home = (home_off / league_avg) * away_def
+        expected_away = (away_off / league_avg) * home_def
+        
+        # Return expected goal differential
+        return [expected_home - expected_away]
+
+
 class Model:
     """Main ensemble model for ice hockey betting"""
     
@@ -420,7 +589,8 @@ class Model:
             HockeyFourFactor(),
             GradientDescent(),
             Exhaustion(),
-            NateSilverElo()
+            NateSilverElo(),
+            PoissonGoalModel()
         ]
         
         self.ensamble_required_n = 500  # Reduced from 2000 for faster startup
@@ -436,7 +606,7 @@ class Model:
         for model in self.model_list:
             if isinstance(model, NateSilverElo):
                 data = model.get_input_data(home_id, away_id, season)
-            elif isinstance(model, (Pythagorean, Exhaustion, HockeyFourFactor)):
+            elif isinstance(model, (Pythagorean, Exhaustion, HockeyFourFactor, PoissonGoalModel)):
                 data = model.get_input_data(home_id, away_id, date)
             else:  # GradientDescent
                 data = model.get_input_data(home_id, away_id, season, date)
