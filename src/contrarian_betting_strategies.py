@@ -70,54 +70,117 @@ class ContrarianBettingStrategy(EloModel):
         self.draw_bias_multiplier = draw_bias_multiplier
         self.underdog_bias_multiplier = underdog_bias_multiplier
     
+    def _get_probabilities(self, home_id: int, away_id: int) -> List[float]:
+        """
+        Get win probabilities for home, away, and draw.
+        Returns: [prob_home, prob_away, prob_draw]
+        """
+        home_rating = self._get_adjusted_rating(home_id, is_home=True)
+        away_rating = self._get_adjusted_rating(away_id, is_home=False)
+        prob_h, prob_a, prob_d = self._calculate_probabilities(home_rating, away_rating)
+        return [prob_h, prob_a, prob_d]
+    
     def place_bets(
-        self, games: pd.DataFrame, bankroll: float, min_bet: float = 10
-    ) -> np.ndarray:
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
         """
-        Place bets using contrarian approach based on confidence
+        Place bets using contrarian approach based on confidence.
+        Overrides EloModel.place_bets to implement contrarian logic.
         """
-        n_games = len(games)
-        bets = np.zeros((n_games, 3))  # [home, draw, away]
+        # Update ratings with new game results
+        if not inc.empty:
+            self._update_ratings(inc)
         
-        for i, (_, game) in enumerate(games.iterrows()):
-            home_id = game["HID"]
-            away_id = game["AID"]
+        # Initialize empty bets
+        bets = pd.DataFrame(
+            0.0,
+            index=opps.index,
+            columns=["BetH", "BetA", "BetD"]
+        )
+        
+        if opps.empty:
+            return bets
+        
+        # Get betting constraints
+        bankroll = summary.iloc[0]["Bankroll"]
+        min_bet = summary.iloc[0]["Min_bet"]
+        max_bet = summary.iloc[0]["Max_bet"]
+        
+        # Calculate bets for each opportunity
+        for idx, row in opps.iterrows():
+            home_id = row["HID"]
+            away_id = row["AID"]
+            odds_h = row["OddsH"]
+            odds_a = row["OddsA"]
+            odds_d = row["OddsD"]
+            
+            # Skip if no valid odds
+            if odds_h == 0 or odds_a == 0 or odds_d == 0:
+                continue
+            
+            # Ensure teams have ratings
+            if home_id not in self.ratings:
+                self.ratings[home_id] = self.initial_rating
+                self.team_form[home_id] = []
+                self.team_streaks[home_id] = 0
+            if away_id not in self.ratings:
+                self.ratings[away_id] = self.initial_rating
+                self.team_form[away_id] = []
+                self.team_streaks[away_id] = 0
             
             # Get probabilities
             probs = self._get_probabilities(home_id, away_id)
-            
-            # Get odds
-            odds = [game.get("OddsH", 0), game.get("OddsD", 0), game.get("OddsA", 0)]
-            if any(o == 0 for o in odds):
-                continue
             
             # Calculate confidence score
             confidence = self._calculate_confidence(probs, home_id, away_id)
             
             # Calculate edges
-            edges = [probs[j] * odds[j] - 1 for j in range(3)]
+            edges = [
+                probs[0] * odds_h - 1,  # home edge
+                probs[2] * odds_d - 1,  # draw edge  
+                probs[1] * odds_a - 1   # away edge
+            ]
             
             # Determine betting strategy based on confidence
             if confidence >= self.high_confidence_threshold:
                 # HIGH CONFIDENCE: Standard Kelly on favorite
-                bet_amount = self._bet_on_favorite(probs, odds, edges, bankroll)
+                bet_amount = self._bet_on_favorite(probs, [odds_h, odds_a, odds_d], edges, bankroll)
                 if bet_amount > min_bet:
                     favorite_idx = np.argmax(probs)
-                    bets[i, favorite_idx] = bet_amount
+                    if favorite_idx == 0:
+                        bets.at[idx, "BetH"] = bet_amount
+                    elif favorite_idx == 1:
+                        bets.at[idx, "BetA"] = bet_amount
+                    else:
+                        bets.at[idx, "BetD"] = bet_amount
             
             elif confidence <= self.low_confidence_threshold:
                 # LOW CONFIDENCE: Contrarian betting (underdog or draw)
-                bet_amount = self._bet_contrarian(probs, odds, edges, bankroll, confidence)
-                if bet_amount is not None and bet_amount[1] > min_bet:
-                    bets[i, bet_amount[0]] = bet_amount[1]
+                bet_result = self._bet_contrarian(probs, [odds_h, odds_a, odds_d], edges, bankroll, confidence)
+                if bet_result is not None:
+                    bet_idx, bet_amount = bet_result
+                    if bet_amount > min_bet:
+                        if bet_idx == 0:
+                            bets.at[idx, "BetH"] = bet_amount
+                        elif bet_idx == 1:
+                            bets.at[idx, "BetD"] = bet_amount
+                        else:
+                            bets.at[idx, "BetA"] = bet_amount
             
             # MEDIUM CONFIDENCE: No bet (uncertain)
         
         # Scale bets if total exceeds bankroll
-        total_bet = np.sum(bets)
+        total_bet = bets[["BetH", "BetA", "BetD"]].sum().sum()
         if total_bet > bankroll:
-            bets *= (bankroll * 0.95) / total_bet
-            bets[bets < min_bet] = 0
+            scale_factor = (bankroll * 0.95) / total_bet
+            bets[["BetH", "BetA", "BetD"]] *= scale_factor
+            # Re-apply min_bet filter
+            bets.loc[bets["BetH"] < min_bet, "BetH"] = 0
+            bets.loc[bets["BetA"] < min_bet, "BetA"] = 0
+            bets.loc[bets["BetD"] < min_bet, "BetD"] = 0
         
         return bets
     
@@ -211,9 +274,9 @@ class ContrarianBettingStrategy(EloModel):
         
         # 3. Form consistency (0-1, lower variance = more confident)
         form_consistency = 0.5  # Default
-        if home_id in self.recent_form and away_id in self.recent_form:
-            home_form_var = np.var(self.recent_form[home_id]) if len(self.recent_form[home_id]) > 1 else 0
-            away_form_var = np.var(self.recent_form[away_id]) if len(self.recent_form[away_id]) > 1 else 0
+        if home_id in self.team_form and away_id in self.team_form:
+            home_form_var = np.var(self.team_form[home_id]) if len(self.team_form[home_id]) > 1 else 0
+            away_form_var = np.var(self.team_form[away_id]) if len(self.team_form[away_id]) > 1 else 0
             avg_variance = (home_form_var + away_form_var) / 2
             form_consistency = 1.0 / (1.0 + avg_variance)  # Lower variance = higher consistency
         
@@ -273,26 +336,80 @@ class AdaptiveContrarianStrategy(EloModel):
         self.draw_bias = draw_bias
         self.underdog_bias = underdog_bias
     
+    def _get_probabilities(self, home_id: int, away_id: int) -> List[float]:
+        """
+        Get win probabilities for home, away, and draw.
+        Returns: [prob_home, prob_away, prob_draw]
+        """
+        home_rating = self._get_adjusted_rating(home_id, is_home=True)
+        away_rating = self._get_adjusted_rating(away_id, is_home=False)
+        prob_h, prob_a, prob_d = self._calculate_probabilities(home_rating, away_rating)
+        return [prob_h, prob_a, prob_d]
+        self.threshold_high = threshold_high
+        self.threshold_medium_low = threshold_medium_low
+        self.threshold_low = threshold_low
+        self.draw_bias = draw_bias
+        self.underdog_bias = underdog_bias
+    
     def place_bets(
-        self, games: pd.DataFrame, bankroll: float, min_bet: float = 10
-    ) -> np.ndarray:
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
         """
-        Place bets using adaptive thresholds
+        Place bets using adaptive thresholds.
+        Overrides EloModel.place_bets to implement adaptive contrarian logic.
         """
-        n_games = len(games)
-        bets = np.zeros((n_games, 3))
+        # Update ratings with new game results
+        if not inc.empty:
+            self._update_ratings(inc)
         
-        for i, (_, game) in enumerate(games.iterrows()):
-            home_id = game["HID"]
-            away_id = game["AID"]
+        # Initialize empty bets
+        bets = pd.DataFrame(
+            0.0,
+            index=opps.index,
+            columns=["BetH", "BetA", "BetD"]
+        )
+        
+        if opps.empty:
+            return bets
+        
+        # Get betting constraints
+        bankroll = summary.iloc[0]["Bankroll"]
+        min_bet = summary.iloc[0]["Min_bet"]
+        max_bet = summary.iloc[0]["Max_bet"]
+        
+        # Calculate bets for each opportunity
+        for idx, row in opps.iterrows():
+            home_id = row["HID"]
+            away_id = row["AID"]
+            odds_h = row["OddsH"]
+            odds_a = row["OddsA"]
+            odds_d = row["OddsD"]
             
-            probs = self._get_probabilities(home_id, away_id)
-            odds = [game.get("OddsH", 0), game.get("OddsD", 0), game.get("OddsA", 0)]
-            if any(o == 0 for o in odds):
+            # Skip if no valid odds
+            if odds_h == 0 or odds_a == 0 or odds_d == 0:
                 continue
             
+            # Ensure teams have ratings
+            if home_id not in self.ratings:
+                self.ratings[home_id] = self.initial_rating
+                self.team_form[home_id] = []
+                self.team_streaks[home_id] = 0
+            if away_id not in self.ratings:
+                self.ratings[away_id] = self.initial_rating
+                self.team_form[away_id] = []
+                self.team_streaks[away_id] = 0
+            
+            probs = self._get_probabilities(home_id, away_id)
+            edges = [
+                probs[0] * odds_h - 1,
+                probs[2] * odds_d - 1,
+                probs[1] * odds_a - 1
+            ]
+            
             confidence = self._calculate_confidence(probs, home_id, away_id)
-            edges = [probs[j] * odds[j] - 1 for j in range(3)]
             
             # Progressive betting based on confidence levels
             if confidence >= self.threshold_very_high:
@@ -301,7 +418,12 @@ class AdaptiveContrarianStrategy(EloModel):
                 if edges[favorite_idx] > self.min_edge:
                     bet = 0.30 * edges[favorite_idx] * bankroll
                     if bet > min_bet:
-                        bets[i, favorite_idx] = bet
+                        if favorite_idx == 0:
+                            bets.at[idx, "BetH"] = bet
+                        elif favorite_idx == 1:
+                            bets.at[idx, "BetA"] = bet
+                        else:
+                            bets.at[idx, "BetD"] = bet
             
             elif confidence >= self.threshold_high:
                 # High confidence: Moderate favorite bet (20% Kelly)
@@ -309,7 +431,12 @@ class AdaptiveContrarianStrategy(EloModel):
                 if edges[favorite_idx] > self.min_edge:
                     bet = 0.20 * edges[favorite_idx] * bankroll
                     if bet > min_bet:
-                        bets[i, favorite_idx] = bet
+                        if favorite_idx == 0:
+                            bets.at[idx, "BetH"] = bet
+                        elif favorite_idx == 1:
+                            bets.at[idx, "BetA"] = bet
+                        else:
+                            bets.at[idx, "BetD"] = bet
             
             elif confidence >= self.threshold_medium_low:
                 # Medium confidence: No bet (too uncertain)
@@ -318,28 +445,42 @@ class AdaptiveContrarianStrategy(EloModel):
             elif confidence >= self.threshold_low:
                 # Low confidence: Moderate contrarian (10% Kelly)
                 result = self._place_contrarian_bet(
-                    probs, odds, edges, bankroll, 0.10, confidence
+                    probs, [odds_h, odds_a, odds_d], edges, bankroll, 0.10, confidence
                 )
                 if result:
-                    idx, bet = result
+                    bet_idx, bet = result
                     if bet > min_bet:
-                        bets[i, idx] = bet
+                        if bet_idx == 0:
+                            bets.at[idx, "BetH"] = bet
+                        elif bet_idx == 1:
+                            bets.at[idx, "BetD"] = bet
+                        else:
+                            bets.at[idx, "BetA"] = bet
             
             else:
                 # Very low confidence: Strong contrarian (15% Kelly)
                 result = self._place_contrarian_bet(
-                    probs, odds, edges, bankroll, 0.15, confidence
+                    probs, [odds_h, odds_a, odds_d], edges, bankroll, 0.15, confidence
                 )
                 if result:
-                    idx, bet = result
+                    bet_idx, bet = result
                     if bet > min_bet:
-                        bets[i, idx] = bet
+                        if bet_idx == 0:
+                            bets.at[idx, "BetH"] = bet
+                        elif bet_idx == 1:
+                            bets.at[idx, "BetD"] = bet
+                        else:
+                            bets.at[idx, "BetA"] = bet
         
         # Scale if needed
-        total_bet = np.sum(bets)
+        total_bet = bets[["BetH", "BetA", "BetD"]].sum().sum()
         if total_bet > bankroll:
-            bets *= (bankroll * 0.95) / total_bet
-            bets[bets < min_bet] = 0
+            scale_factor = (bankroll * 0.95) / total_bet
+            bets[["BetH", "BetA", "BetD"]] *= scale_factor
+            # Re-apply min_bet filter
+            bets.loc[bets["BetH"] < min_bet, "BetH"] = 0
+            bets.loc[bets["BetA"] < min_bet, "BetA"] = 0
+            bets.loc[bets["BetD"] < min_bet, "BetD"] = 0
         
         return bets
     
@@ -386,9 +527,9 @@ class AdaptiveContrarianStrategy(EloModel):
         
         # Form consistency
         form_consistency = 0.5
-        if home_id in self.recent_form and away_id in self.recent_form:
-            home_var = np.var(self.recent_form[home_id]) if len(self.recent_form[home_id]) > 1 else 0
-            away_var = np.var(self.recent_form[away_id]) if len(self.recent_form[away_id]) > 1 else 0
+        if home_id in self.team_form and away_id in self.team_form:
+            home_var = np.var(self.team_form[home_id]) if len(self.team_form[home_id]) > 1 else 0
+            away_var = np.var(self.team_form[away_id]) if len(self.team_form[away_id]) > 1 else 0
             avg_var = (home_var + away_var) / 2
             form_consistency = 1.0 / (1.0 + avg_var)
         
