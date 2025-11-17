@@ -650,7 +650,7 @@ class Model:
                  poisson_decay=0.992,
                  # Betting strategy parameters
                  bet_threshold=0.05,
-                 bet_size_base=0.02,
+                 bet_size_base=0.03,
                  bet_kelly_fraction=0.25):
         """
         Initialize the ensemble model with configurable hyperparameters.
@@ -672,9 +672,9 @@ class Model:
             elo_margin_cap: Maximum goal differential to consider
             poisson_regularization: Regularization for Poisson model
             poisson_decay: Daily decay for Poisson rates
-            bet_threshold: Minimum edge over implied odds to place bet
-            bet_size_base: Base bet size as fraction of bankroll
-            bet_kelly_fraction: Kelly criterion fraction for bet sizing
+            bet_threshold: Minimum edge over implied odds to place bet (e.g., 0.05 = 5% edge required)
+            bet_size_base: Base bet size as fraction of bankroll (e.g., 0.03 = 3% of bankroll)
+            bet_kelly_fraction: Kelly criterion fraction for bet sizing (e.g., 0.25 = quarter Kelly)
         """
         # Initialize sub-models with parameters
         self.model_list = [
@@ -823,12 +823,12 @@ class Model:
                     if edge_home > self.bet_threshold and odds_home > 1.0:
                         # Kelly criterion bet size with fractional Kelly
                         kelly_size = self.bet_kelly_fraction * (edge_home / (odds_home - 1))
-                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 3)))
+                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
                         bets.at[i, 'BetH'] = bet_amount
                     
                     if edge_away > self.bet_threshold and odds_away > 1.0:
                         kelly_size = self.bet_kelly_fraction * (edge_away / (odds_away - 1))
-                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 3)))
+                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
                         bets.at[i, 'BetA'] = bet_amount
         
         return bets

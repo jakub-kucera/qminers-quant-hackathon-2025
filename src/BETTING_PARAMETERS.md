@@ -2,6 +2,19 @@
 
 This document describes the betting strategy hyperparameters that control how the model places bets based on its predictions.
 
+## Important: Bet Sizing is Percentage-Based
+
+**All bet sizes are calculated as FRACTIONS (percentages) of your current bankroll**, not absolute dollar amounts:
+
+- `bet_size_base = 0.03` means **3% of bankroll**, not $0.03
+- With $1000 bankroll: 3% = $30 base bet
+- With $2000 bankroll: 3% = $60 base bet (scales automatically)
+
+**Why percentage-based?**
+- Automatically scales with bankroll growth/decline
+- Consistent risk management throughout betting lifecycle
+- Follows Kelly criterion best practices
+
 ## Overview
 
 After optimizing prediction accuracy with model hyperparameters, betting strategy parameters control:
@@ -24,16 +37,17 @@ These parameters are separate from prediction hyperparameters to allow independe
   - threshold=0.10: Only bet when predicted prob is 10% better than market
 - **Tuning tip**: Higher thresholds are more conservative but may miss value
 
-### `bet_size_base` (default: 0.02)
+### `bet_size_base` (default: 0.03)
 - **What**: Base bet size as a fraction of bankroll
 - **Range**: 0.005-0.05 (0.5% to 5% of bankroll)
 - **Impact**: 
   - Lower = more conservative, lower variance
   - Higher = more aggressive, higher variance
-- **Cap**: Maximum bet size is capped at 3x this value
+- **Cap**: Maximum bet size is capped at 5x this value
 - **Example**:
-  - bet_size_base=0.02: Base bet is 2% of bankroll
-  - bet_size_base=0.04: Base bet is 4% of bankroll
+  - bet_size_base=0.03: Base bet is 3% of bankroll, cap at 15%
+  - bet_size_base=0.02: Base bet is 2% of bankroll, cap at 10%
+  - bet_size_base=0.05: Base bet is 5% of bankroll, cap at 25%
 - **Tuning tip**: Consider bankroll volatility and risk tolerance
 
 ### `bet_kelly_fraction` (default: 0.25)
@@ -62,7 +76,7 @@ if edge_home > bet_threshold:
     kelly_size = bet_kelly_fraction * (edge_home / (odds_home - 1))
     
     # 4. Apply constraints
-    bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, bet_size_base * 3)))
+    bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, bet_size_base * 5)))
 ```
 
 ## Optimization Strategy
@@ -103,7 +117,7 @@ model = Model(
 ```python
 model = Model(
     bet_threshold=0.05,      # Bet with 5% edge
-    bet_size_base=0.02,      # 2% base bet size
+    bet_size_base=0.03,      # 3% base bet size
     bet_kelly_fraction=0.25  # Quarter Kelly
 )
 ```
@@ -129,7 +143,7 @@ Based on hockey betting research and market efficiency:
 
 **Key Principles**:
 1. Never bet more than necessary to achieve Kelly sizing
-2. Cap maximum bet at 3x base size to limit exposure
+2. Cap maximum bet at 5x base size to limit exposure (was 3x, increased for better bet sizing)
 3. Use fractional Kelly (not full Kelly) to reduce variance
 4. Higher thresholds in efficient markets (NHL is relatively efficient)
 
