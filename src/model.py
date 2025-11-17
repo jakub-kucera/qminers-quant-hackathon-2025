@@ -630,24 +630,28 @@ class Model:
     """Main ensemble model for ice hockey betting"""
     
     def __init__(self, 
-                 # Ensemble parameters
-                 ensamble_required_n=500,
-                 ensamble_retrain_freq=400,
-                 # Sub-model parameters
-                 pythagorean_power=1.0,
-                 pythagorean_regularization=20,
+                 # Ensemble parameters (optimized defaults)
+                 ensamble_required_n=700,
+                 ensamble_retrain_freq=600,
+                 # Sub-model parameters (optimized defaults)
+                 pythagorean_power=1.499553707049086,
+                 pythagorean_regularization=10,
                  pythagorean_decay=0.992,
-                 four_factor_required_n=500,
-                 four_factor_decay=0.994,
+                 four_factor_required_n=400,
+                 four_factor_decay=0.9903001400465671,
                  gradient_descent_epochs=12,
-                 gradient_descent_min_games=500,
-                 exhaustion_b2b_penalty=1.5,
-                 exhaustion_road_penalty=0.5,
-                 elo_k_base=15,
-                 elo_home_advantage=35,
-                 elo_margin_cap=3,
-                 poisson_regularization=3.0,
-                 poisson_decay=0.992):
+                 gradient_descent_min_games=800,
+                 exhaustion_b2b_penalty=1.8708290679206017,
+                 exhaustion_road_penalty=0.6669690630456186,
+                 elo_k_base=10,
+                 elo_home_advantage=50,
+                 elo_margin_cap=5,
+                 poisson_regularization=2.6883250153197973,
+                 poisson_decay=0.992,
+                 # Betting strategy parameters
+                 bet_threshold=0.05,
+                 bet_size_base=0.02,
+                 bet_kelly_fraction=0.25):
         """
         Initialize the ensemble model with configurable hyperparameters.
         
@@ -668,6 +672,9 @@ class Model:
             elo_margin_cap: Maximum goal differential to consider
             poisson_regularization: Regularization for Poisson model
             poisson_decay: Daily decay for Poisson rates
+            bet_threshold: Minimum edge over implied odds to place bet
+            bet_size_base: Base bet size as fraction of bankroll
+            bet_kelly_fraction: Kelly criterion fraction for bet sizing
         """
         # Initialize sub-models with parameters
         self.model_list = [
@@ -705,6 +712,11 @@ class Model:
         self.ensamble = None
         self.ensamble_retrain = 0
         self.prediction_map = {}
+        
+        # Betting strategy parameters
+        self.bet_threshold = bet_threshold
+        self.bet_size_base = bet_size_base
+        self.bet_kelly_fraction = bet_kelly_fraction
 
     def _get_input_features(self, home_id, away_id, season, date):
         """Get input features from all sub-models"""
@@ -796,17 +808,27 @@ class Model:
                     odds_away = current['OddsA']
                     odds_draw = current['OddsD']
                     
-                    # Simple betting strategy: bet when odds are favorable
-                    my_bet = max(min_bet, min(max_bet / 2, bankroll * 0.02))
+                    # Kelly criterion for bet sizing
+                    # bet_size = kelly_fraction * (edge / (odds - 1))
+                    # where edge = predicted_prob * odds - 1
                     
                     # Bet on home if predicted probability is higher than implied odds
-                    min_home_odds = (1 / pred + 0.05) if pred > 0.5 else 999
-                    min_away_odds = (1 / (1 - pred) + 0.05) if pred < 0.5 else 999
+                    implied_home = 1 / odds_home if odds_home > 1.0 else 1.0
+                    implied_away = 1 / odds_away if odds_away > 1.0 else 1.0
                     
-                    if odds_home >= min_home_odds and odds_home > 1.0:
-                        bets.at[i, 'BetH'] = my_bet
+                    edge_home = pred - implied_home
+                    edge_away = (1 - pred) - implied_away
                     
-                    if odds_away >= min_away_odds and odds_away > 1.0:
-                        bets.at[i, 'BetA'] = my_bet
+                    # Place bet if edge exceeds threshold
+                    if edge_home > self.bet_threshold and odds_home > 1.0:
+                        # Kelly criterion bet size with fractional Kelly
+                        kelly_size = self.bet_kelly_fraction * (edge_home / (odds_home - 1))
+                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 3)))
+                        bets.at[i, 'BetH'] = bet_amount
+                    
+                    if edge_away > self.bet_threshold and odds_away > 1.0:
+                        kelly_size = self.bet_kelly_fraction * (edge_away / (odds_away - 1))
+                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 3)))
+                        bets.at[i, 'BetA'] = bet_amount
         
         return bets

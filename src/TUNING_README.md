@@ -132,6 +132,54 @@ best_params = optimizer.optimize(n_trials=100, n_jobs=4, storage='sqlite:///optu
 - Use `--n-jobs -1` to automatically use all available CPU cores
 - For 100+ trials, parallel execution can provide 3-4x speedup on 4 cores
 
+### 4. `optimize_betting.py` - Betting Strategy Optimization
+
+Optimize betting strategy parameters to maximize final bankroll, keeping prediction model fixed.
+
+**Usage:**
+```bash
+# Sequential execution
+python3 src/optimize_betting.py --n-trials 50
+
+# Parallel execution with 4 workers
+python3 src/optimize_betting.py --n-trials 100 --n-jobs 4
+
+# Use all CPU cores
+python3 src/optimize_betting.py --n-trials 100 --n-jobs -1
+```
+
+**Command-line Options:**
+- `--n-trials`: Number of optimization trials (default: 50)
+- `--n-jobs`: Number of parallel workers (default: 1)
+- `--study-name`: Study identifier (default: betting_strategy_optimization)
+- `--storage`: Database URL for parallel execution
+- `--validation-period`: Validation days (default: 365)
+
+**Features:**
+- Optimizes betting parameters (bet_threshold, bet_size_base, bet_kelly_fraction)
+- Uses optimized prediction hyperparameters from previous optimization
+- Maximizes final bankroll on validation period
+- Parallel execution support
+- Kelly criterion bet sizing
+
+**Parameters Optimized:**
+- `bet_threshold` (0.0-0.15): Minimum edge to place bet
+- `bet_size_base` (0.005-0.05): Base bet size as fraction of bankroll
+- `bet_kelly_fraction` (0.1-0.5): Kelly criterion fraction
+
+**Example Output:**
+```
+Best trial:
+  Profit: $1250.50
+  Params: {'bet_threshold': 0.065, 'bet_size_base': 0.023, 'bet_kelly_fraction': 0.28}
+```
+
+### 5. Documentation
+
+- `HYPERPARAMETERS.md`: Detailed guide for all 17 model hyperparameters
+- `BETTING_PARAMETERS.md`: Guide for betting strategy parameters
+- `parallel_optimization_example.py`: Example scripts for parallel optimization
+
 ## Workflow
 
 ### Phase 1: Quick Iteration
@@ -174,10 +222,26 @@ test_metrics = tuner.evaluate_on_test_set(Model, best_params)
 ```
 
 ### Phase 4: Betting Strategy Optimization
-After model accuracy is good, optimize betting parameters:
-- Bet sizing
-- Confidence thresholds
-- Kelly criterion fractions
+After model accuracy is optimized, optimize betting parameters separately:
+
+```bash
+# Optimize betting strategy for maximum bankroll
+python3 src/optimize_betting.py --n-trials 100 --n-jobs 4
+```
+
+**Betting Parameters:**
+- `bet_threshold`: Minimum edge over implied odds to place bet
+- `bet_size_base`: Base bet size as fraction of bankroll
+- `bet_kelly_fraction`: Kelly criterion fraction for bet sizing
+
+**See**: `BETTING_PARAMETERS.md` for detailed documentation
+
+**Tool**: `optimize_betting.py` - Bayesian optimization of betting strategy
+
+**Why separate?**:
+- Prediction accuracy is independent of betting strategy
+- Different risk tolerances can use same model
+- Easier to tune each component independently
 
 ## Metrics Explained
 
