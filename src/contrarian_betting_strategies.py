@@ -80,14 +80,14 @@ class ContrarianBettingStrategy(EloModel):
         bets = np.zeros((n_games, 3))  # [home, draw, away]
         
         for i, (_, game) in enumerate(games.iterrows()):
-            home_id = game["HomeTeam"]
-            away_id = game["AwayTeam"]
+            home_id = game["HID"]
+            away_id = game["AID"]
             
             # Get probabilities
             probs = self._get_probabilities(home_id, away_id)
             
             # Get odds
-            odds = [game.get("B365H", 0), game.get("B365D", 0), game.get("B365A", 0)]
+            odds = [game.get("OddsH", 0), game.get("OddsD", 0), game.get("OddsA", 0)]
             if any(o == 0 for o in odds):
                 continue
             
@@ -283,11 +283,11 @@ class AdaptiveContrarianStrategy(EloModel):
         bets = np.zeros((n_games, 3))
         
         for i, (_, game) in enumerate(games.iterrows()):
-            home_id = game["HomeTeam"]
-            away_id = game["AwayTeam"]
+            home_id = game["HID"]
+            away_id = game["AID"]
             
             probs = self._get_probabilities(home_id, away_id)
-            odds = [game.get("B365H", 0), game.get("B365D", 0), game.get("B365A", 0)]
+            odds = [game.get("OddsH", 0), game.get("OddsD", 0), game.get("OddsA", 0)]
             if any(o == 0 for o in odds):
                 continue
             
