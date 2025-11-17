@@ -65,6 +65,7 @@ class BettingOptimizer:
             ensamble_retrain_freq=600,
             pythagorean_power=1.499553707049086,
             pythagorean_regularization=10,
+            pythagorean_decay=0.992,
             four_factor_required_n=400,
             four_factor_decay=0.9903001400465671,
             gradient_descent_epochs=12,
@@ -75,6 +76,7 @@ class BettingOptimizer:
             elo_home_advantage=50,
             elo_margin_cap=5,
             poisson_regularization=2.6883250153197973,
+            poisson_decay=0.992,
             # Betting strategy parameters (being optimized)
             bet_threshold=bet_threshold,
             bet_size_base=bet_size_base,
