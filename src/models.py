@@ -8,7 +8,7 @@ This module provides:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 import pandas as pd
 
@@ -119,7 +119,7 @@ class EloModel(BaseModel):
         # Initialize from params
         self.k_factor = k_factor
         self.home_advantage = home_advantage
-        self.rolling_window = rolling_window
+        self.rolling_window = int(rolling_window)  # Ensure it's an integer
         self.min_edge = min_edge
         self.kelly_fraction = kelly_fraction
         self.form_adjustment_weight = form_adjustment_weight
@@ -210,6 +210,7 @@ class EloModel(BaseModel):
         total_bet = bets.sum().sum()
         if total_bet > bankroll:
             bets *= (bankroll * 0.95) / total_bet  # Use 95% to be safe
+            bets[bets < min_bet] = 0  # Re-apply min_bet filter after scaling
         
         return bets
     
@@ -220,7 +221,6 @@ class EloModel(BaseModel):
             away_id = game["AID"]
             home_won = game["H"]
             away_won = game["A"]
-            draw = game["D"]
             
             # Initialize if needed
             if home_id not in self.ratings:
@@ -261,13 +261,13 @@ class EloModel(BaseModel):
             if len(self.team_form[away_id]) > self.rolling_window:
                 self.team_form[away_id].pop(0)
             
-            # Update streaks
+            # Update streaks - allow streaks to accumulate
             if home_won:
-                self.team_streaks[home_id] = max(1, self.team_streaks[home_id] + 1)
-                self.team_streaks[away_id] = min(-1, self.team_streaks[away_id] - 1)
+                self.team_streaks[home_id] = self.team_streaks[home_id] + 1 if self.team_streaks[home_id] > 0 else 1
+                self.team_streaks[away_id] = self.team_streaks[away_id] - 1 if self.team_streaks[away_id] < 0 else -1
             elif away_won:
-                self.team_streaks[home_id] = min(-1, self.team_streaks[home_id] - 1)
-                self.team_streaks[away_id] = max(1, self.team_streaks[away_id] + 1)
+                self.team_streaks[home_id] = self.team_streaks[home_id] - 1 if self.team_streaks[home_id] < 0 else -1
+                self.team_streaks[away_id] = self.team_streaks[away_id] + 1 if self.team_streaks[away_id] > 0 else 1
             else:  # draw
                 self.team_streaks[home_id] = 0
                 self.team_streaks[away_id] = 0
@@ -390,7 +390,10 @@ class AdvancedEloModel(EloModel):
         
         # Additional adjustment based on score differential
         for idx, game in games.iterrows():
-            if "HS" in game and "AS" in game:
+            if (
+                "HS" in game and "AS" in game
+                and pd.notna(game["HS"]) and pd.notna(game["AS"])
+            ):
                 home_id = game["HID"]
                 away_id = game["AID"]
                 score_diff = game["HS"] - game["AS"]

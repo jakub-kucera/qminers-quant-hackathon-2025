@@ -15,7 +15,7 @@ import logging
 from model import Model
 from models import EloModel, AdvancedEloModel
 from environment import Environment
-from optuna_tuner import OptunaHyperparameterTuner, compare_models
+from optuna_tuner import OptunaHyperparameterTuner, compare_models, evaluate_prediction_accuracy
 
 
 # Configure logging
@@ -43,7 +43,7 @@ def run_baseline_evaluation(
         max_bet=max_bet
     )
     
-    evaluation = env.run()
+    env.run()
     
     print()
     print(f"Final bankroll: {env.bankroll:.2f}")
@@ -177,6 +177,41 @@ def run_model_comparison(
     return results_df
 
 
+def test_prediction_accuracy(
+    games: pd.DataFrame,
+    model_class=EloModel,
+    model_params: dict = None,
+):
+    """Test prediction accuracy of a model."""
+    logger.info(f"Testing prediction accuracy for {model_class.__name__}...")
+    
+    if model_params is None:
+        model_params = {}
+    
+    # Create model
+    model = model_class(**model_params)
+    
+    # Evaluate prediction accuracy
+    metrics = evaluate_prediction_accuracy(model, games)
+    
+    # Save results
+    accuracy_file = f"prediction_accuracy_{model_class.__name__}.txt"
+    with open(accuracy_file, 'w') as f:
+        f.write(f"Prediction Accuracy for {model_class.__name__}\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Overall Accuracy: {metrics['accuracy']:.2%}\n")
+        f.write(f"Home Win Accuracy: {metrics['home_accuracy']:.2%}\n")
+        f.write(f"Away Win Accuracy: {metrics['away_accuracy']:.2%}\n")
+        f.write(f"Draw Accuracy: {metrics['draw_accuracy']:.2%}\n")
+        f.write(f"Log Loss: {metrics['log_loss']:.4f}\n")
+        f.write(f"Brier Score: {metrics['brier_score']:.4f}\n")
+        f.write(f"Total Predictions: {metrics['total_predictions']}\n")
+    
+    logger.info(f"Accuracy results saved to {accuracy_file}")
+    
+    return metrics
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -204,6 +239,11 @@ def main():
         "--compare",
         action="store_true",
         help="Compare different model configurations"
+    )
+    parser.add_argument(
+        "--test-accuracy",
+        action="store_true",
+        help="Test prediction accuracy of the model"
     )
     parser.add_argument(
         "--bankroll",
@@ -245,6 +285,14 @@ def main():
             init_bankroll=args.bankroll,
             min_bet=args.min_bet,
             max_bet=args.max_bet,
+        )
+    elif args.test_accuracy:
+        # Select model class
+        model_class = EloModel if args.model == "elo" else AdvancedEloModel
+        
+        test_prediction_accuracy(
+            games,
+            model_class=model_class,
         )
     elif args.optimize:
         # Select model class

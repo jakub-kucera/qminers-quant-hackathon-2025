@@ -12,8 +12,7 @@ import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional, Callable, Type
+from typing import Dict, Any, Optional, Type
 import logging
 
 from environment import Environment
@@ -77,12 +76,13 @@ class OptunaHyperparameterTuner:
             train_end_date = all_dates.iloc[split_idx]
         
         if test_start_date is None:
-            test_start_date = train_end_date
+            # Add one day to avoid data leakage
+            test_start_date = train_end_date + pd.Timedelta(days=1)
         
         self.train_end_date = pd.to_datetime(train_end_date)
         self.test_start_date = pd.to_datetime(test_start_date)
         
-        # Split data
+        # Split data - no overlap between train and test
         self.train_data = games_data[games_data["Date"] <= self.train_end_date]
         self.test_data = games_data[games_data["Date"] >= self.test_start_date]
         
@@ -169,7 +169,7 @@ class OptunaHyperparameterTuner:
         Returns:
             Dictionary of hyperparameters
         """
-        if self.model_class == EloModel or issubclass(self.model_class, EloModel):
+        if self.model_class == EloModel or (isinstance(self.model_class, type) and issubclass(self.model_class, EloModel)):
             params = {
                 "k_factor": trial.suggest_float("k_factor", 5.0, 50.0),
                 "home_advantage": trial.suggest_float("home_advantage", 0.0, 200.0),
@@ -264,7 +264,10 @@ class OptunaHyperparameterTuner:
         # Calculate additional metrics
         max_bankroll = history["Bankroll"].max()
         min_bankroll = history["Bankroll"].min()
-        max_drawdown = ((max_bankroll - min_bankroll) / max_bankroll) * 100
+        # Correct max drawdown calculation: largest peak-to-trough decline
+        cummax = history["Bankroll"].cummax()
+        drawdown = ((cummax - history["Bankroll"]) / cummax) * 100
+        max_drawdown = drawdown.max() if not drawdown.empty else 0
         
         metrics = {
             "final_bankroll": final_bankroll,
@@ -402,7 +405,10 @@ def compare_models(
         history = env.get_history()
         max_bankroll = history["Bankroll"].max()
         min_bankroll = history["Bankroll"].min()
-        max_drawdown = ((max_bankroll - min_bankroll) / max_bankroll) * 100 if max_bankroll > 0 else 0
+        # Calculate maximum drawdown as the largest peak-to-trough decline
+        cummax = history["Bankroll"].cummax()
+        drawdown = ((cummax - history["Bankroll"]) / cummax) * 100
+        max_drawdown = drawdown.max() if not drawdown.empty else 0
         
         results.append({
             "Model": model_name,
@@ -421,3 +427,156 @@ def compare_models(
     logger.info(results_df.to_string(index=False))
     
     return results_df
+
+
+def evaluate_prediction_accuracy(
+    model: BaseModel,
+    games_data: pd.DataFrame,
+) -> Dict[str, float]:
+    """
+    Evaluate the prediction accuracy of a model.
+    
+    This function measures how well the model predicts game outcomes
+    by comparing the model's predicted probabilities with actual results.
+    
+    Args:
+        model: The model to evaluate
+        games_data: Games dataset with results
+        
+    Returns:
+        Dictionary with accuracy metrics:
+        - accuracy: Overall prediction accuracy (correct outcome predicted)
+        - home_accuracy: Accuracy for home wins
+        - away_accuracy: Accuracy for away wins  
+        - draw_accuracy: Accuracy for draws
+        - log_loss: Logarithmic loss (lower is better)
+        - brier_score: Brier score (lower is better)
+    """
+    import numpy as np
+    
+    correct_predictions = 0
+    total_predictions = 0
+    
+    home_correct = 0
+    home_total = 0
+    away_correct = 0
+    away_total = 0
+    draw_correct = 0
+    draw_total = 0
+    
+    log_loss_sum = 0.0
+    brier_score_sum = 0.0
+    
+    # Create a test environment to get the model to make predictions
+    from environment import Environment
+    
+    for idx, game in games_data.iterrows():
+        # Skip if this is not a completed game
+        if not isinstance(game["H"], bool):
+            continue
+            
+        home_id = game["HID"]
+        away_id = game["AID"]
+        
+        # Ensure teams have ratings in the model
+        if hasattr(model, 'ratings'):
+            if home_id not in model.ratings:
+                model.ratings[home_id] = getattr(model, 'initial_rating', 1500.0)
+                if hasattr(model, 'team_form'):
+                    model.team_form[home_id] = []
+                if hasattr(model, 'team_streaks'):
+                    model.team_streaks[home_id] = 0
+            if away_id not in model.ratings:
+                model.ratings[away_id] = getattr(model, 'initial_rating', 1500.0)
+                if hasattr(model, 'team_form'):
+                    model.team_form[away_id] = []
+                if hasattr(model, 'team_streaks'):
+                    model.team_streaks[away_id] = 0
+            
+            # Get adjusted ratings
+            home_rating = model._get_adjusted_rating(home_id, is_home=True)
+            away_rating = model._get_adjusted_rating(away_id, is_home=False)
+            
+            # Calculate probabilities
+            prob_h, prob_a, prob_d = model._calculate_probabilities(home_rating, away_rating)
+        else:
+            # Model doesn't have the methods we need, skip
+            continue
+        
+        # Get actual outcome
+        actual_home = game["H"]
+        actual_away = game["A"]
+        actual_draw = game["D"]
+        
+        # Determine predicted outcome (highest probability)
+        predicted_probs = [prob_h, prob_a, prob_d]
+        predicted_outcome = np.argmax(predicted_probs)  # 0=home, 1=away, 2=draw
+        
+        # Check if prediction is correct
+        if predicted_outcome == 0 and actual_home:
+            correct_predictions += 1
+        elif predicted_outcome == 1 and actual_away:
+            correct_predictions += 1
+        elif predicted_outcome == 2 and actual_draw:
+            correct_predictions += 1
+        
+        total_predictions += 1
+        
+        # Track by outcome type
+        if actual_home:
+            home_total += 1
+            if predicted_outcome == 0:
+                home_correct += 1
+        elif actual_away:
+            away_total += 1
+            if predicted_outcome == 1:
+                away_correct += 1
+        elif actual_draw:
+            draw_total += 1
+            if predicted_outcome == 2:
+                draw_correct += 1
+        
+        # Calculate log loss (cross-entropy)
+        actual_probs = [float(actual_home), float(actual_away), float(actual_draw)]
+        for actual_prob, pred_prob in zip(actual_probs, predicted_probs):
+            if actual_prob > 0:
+                # Add small epsilon to avoid log(0)
+                log_loss_sum += -actual_prob * np.log(max(pred_prob, 1e-15))
+        
+        # Calculate Brier score (mean squared error of probabilities)
+        brier_score_sum += sum((actual_prob - pred_prob) ** 2 
+                               for actual_prob, pred_prob in zip(actual_probs, predicted_probs))
+        
+        # Update model with this game result for next predictions
+        if hasattr(model, '_update_ratings'):
+            model._update_ratings(pd.DataFrame([game]))
+    
+    # Calculate metrics
+    accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0.0
+    home_accuracy = home_correct / home_total if home_total > 0 else 0.0
+    away_accuracy = away_correct / away_total if away_total > 0 else 0.0
+    draw_accuracy = draw_correct / draw_total if draw_total > 0 else 0.0
+    log_loss = log_loss_sum / total_predictions if total_predictions > 0 else 0.0
+    brier_score = brier_score_sum / total_predictions if total_predictions > 0 else 0.0
+    
+    metrics = {
+        "accuracy": accuracy,
+        "home_accuracy": home_accuracy,
+        "away_accuracy": away_accuracy,
+        "draw_accuracy": draw_accuracy,
+        "log_loss": log_loss,
+        "brier_score": brier_score,
+        "total_predictions": total_predictions,
+    }
+    
+    logger.info("\n" + "="*60)
+    logger.info("PREDICTION ACCURACY METRICS")
+    logger.info("="*60)
+    logger.info(f"Overall Accuracy: {accuracy:.2%}")
+    logger.info(f"Home Win Accuracy: {home_accuracy:.2%} ({home_correct}/{home_total})")
+    logger.info(f"Away Win Accuracy: {away_accuracy:.2%} ({away_correct}/{away_total})")
+    logger.info(f"Draw Accuracy: {draw_accuracy:.2%} ({draw_correct}/{draw_total})")
+    logger.info(f"Log Loss: {log_loss:.4f}")
+    logger.info(f"Brier Score: {brier_score:.4f}")
+    
+    return metrics
