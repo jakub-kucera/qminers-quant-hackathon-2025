@@ -228,8 +228,11 @@ def main():
     
     # Load data
     logger.info("Loading games data...")
+    import os
+    # Support running from both src/ and root directory
+    data_path = "./data/games.csv" if os.path.exists("./data/games.csv") else "../data/games.csv"
     games = pd.read_csv(
-        "./data/games.csv",
+        data_path,
         index_col=0,
         parse_dates=["Date", "Open"]
     )
