@@ -13,7 +13,7 @@ import pandas as pd
 import logging
 
 from model import Model
-from models import EloModel, AdvancedEloModel
+from models import EloModel, AdvancedEloModel, ConfidenceBasedEloModel
 from environment import Environment
 from optuna_tuner import OptunaHyperparameterTuner, compare_models, evaluate_prediction_accuracy
 
@@ -160,6 +160,26 @@ def run_model_comparison(
                 "score_weight": 0.15,
             },
         },
+        "ConfidenceBasedElo (balanced)": {
+            "class": ConfidenceBasedEloModel,
+            "params": {
+                "confidence_threshold": 0.15,
+                "risk_factor": 0.5,
+                "variance_penalty": 0.2,
+                "max_bet_fraction": 0.1,
+            },
+        },
+        "ConfidenceBasedElo (conservative)": {
+            "class": ConfidenceBasedEloModel,
+            "params": {
+                "confidence_threshold": 0.20,
+                "risk_factor": 0.3,
+                "variance_penalty": 0.3,
+                "max_bet_fraction": 0.05,
+                "min_edge": 0.08,
+                "kelly_fraction": 0.15,
+            },
+        },
     }
     
     results_df = compare_models(
@@ -231,7 +251,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        choices=["elo", "advanced_elo"],
+        choices=["elo", "advanced_elo", "confidence"],
         default="elo",
         help="Model to optimize (default: elo)"
     )
@@ -288,7 +308,12 @@ def main():
         )
     elif args.test_accuracy:
         # Select model class
-        model_class = EloModel if args.model == "elo" else AdvancedEloModel
+        if args.model == "elo":
+            model_class = EloModel
+        elif args.model == "advanced_elo":
+            model_class = AdvancedEloModel
+        else:
+            model_class = ConfidenceBasedEloModel
         
         test_prediction_accuracy(
             games,
@@ -296,7 +321,12 @@ def main():
         )
     elif args.optimize:
         # Select model class
-        model_class = EloModel if args.model == "elo" else AdvancedEloModel
+        if args.model == "elo":
+            model_class = EloModel
+        elif args.model == "advanced_elo":
+            model_class = AdvancedEloModel
+        else:
+            model_class = ConfidenceBasedEloModel
         
         run_optimization(
             games,

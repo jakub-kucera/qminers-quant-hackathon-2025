@@ -404,6 +404,228 @@ class AdvancedEloModel(EloModel):
                 self.ratings[away_id] -= adjustment
 
 
+class ConfidenceBasedEloModel(EloModel):
+    """
+    Elo model with confidence-based betting strategy.
+    
+    This model adjusts bet sizing based on:
+    - Prediction confidence (probability margin)
+    - Risk tolerance
+    - Variance in recent predictions
+    - Minimum confidence threshold
+    """
+    
+    def __init__(
+        self,
+        confidence_threshold: float = 0.15,
+        risk_factor: float = 0.5,
+        variance_penalty: float = 0.2,
+        max_bet_fraction: float = 0.1,
+        **kwargs
+    ):
+        """
+        Initialize confidence-based Elo model.
+        
+        Args:
+            confidence_threshold: Minimum confidence margin to place bet (default: 0.15)
+            risk_factor: Risk tolerance multiplier (0-1, lower=more conservative)
+            variance_penalty: Penalty for high prediction variance
+            max_bet_fraction: Maximum fraction of bankroll to bet on single game
+            **kwargs: Parameters for base EloModel
+        """
+        super().__init__(**kwargs)
+        self.confidence_threshold = confidence_threshold
+        self.risk_factor = risk_factor
+        self.variance_penalty = variance_penalty
+        self.max_bet_fraction = max_bet_fraction
+        self.params["confidence_threshold"] = confidence_threshold
+        self.params["risk_factor"] = risk_factor
+        self.params["variance_penalty"] = variance_penalty
+        self.params["max_bet_fraction"] = max_bet_fraction
+        
+        # Track prediction confidence history
+        self.confidence_history = []
+    
+    def place_bets(
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Place bets using confidence-based strategy."""
+        
+        # Update ratings with new game results
+        if not inc.empty:
+            self._update_ratings(inc)
+        
+        # Initialize empty bets
+        bets = pd.DataFrame(
+            0.0,
+            index=opps.index,
+            columns=["BetH", "BetA", "BetD"]
+        )
+        
+        if opps.empty:
+            return bets
+        
+        # Get betting constraints
+        bankroll = summary.iloc[0]["Bankroll"]
+        min_bet = summary.iloc[0]["Min_bet"]
+        max_bet = summary.iloc[0]["Max_bet"]
+        
+        # Calculate bets for each opportunity with confidence weighting
+        for idx, row in opps.iterrows():
+            home_id = row["HID"]
+            away_id = row["AID"]
+            odds_h = row["OddsH"]
+            odds_a = row["OddsA"]
+            odds_d = row["OddsD"]
+            
+            # Ensure teams have ratings
+            if home_id not in self.ratings:
+                self.ratings[home_id] = self.initial_rating
+                self.team_form[home_id] = []
+                self.team_streaks[home_id] = 0
+            if away_id not in self.ratings:
+                self.ratings[away_id] = self.initial_rating
+                self.team_form[away_id] = []
+                self.team_streaks[away_id] = 0
+            
+            # Get adjusted ratings
+            home_rating = self._get_adjusted_rating(home_id, is_home=True)
+            away_rating = self._get_adjusted_rating(away_id, is_home=False)
+            
+            # Calculate win probabilities
+            prob_h, prob_a, prob_d = self._calculate_probabilities(
+                home_rating, away_rating
+            )
+            
+            # Calculate confidence metrics
+            confidence_score = self._calculate_confidence(prob_h, prob_a, prob_d)
+            
+            # Calculate edge for each outcome
+            edge_h = prob_h - (1.0 / odds_h) if odds_h > 0 else -1
+            edge_a = prob_a - (1.0 / odds_a) if odds_a > 0 else -1
+            edge_d = prob_d - (1.0 / odds_d) if odds_d > 0 else -1
+            
+            # Find best bet
+            best_edge = max(edge_h, edge_a, edge_d)
+            
+            # Only bet if edge exceeds minimum AND confidence is sufficient
+            if best_edge > self.min_edge and confidence_score > self.confidence_threshold:
+                # Determine which outcome to bet on
+                if best_edge == edge_h and odds_h > 0:
+                    bet_amount = self._confidence_adjusted_bet(
+                        prob_h, odds_h, bankroll, confidence_score
+                    )
+                    bets.loc[idx, "BetH"] = bet_amount
+                elif best_edge == edge_a and odds_a > 0:
+                    bet_amount = self._confidence_adjusted_bet(
+                        prob_a, odds_a, bankroll, confidence_score
+                    )
+                    bets.loc[idx, "BetA"] = bet_amount
+                elif best_edge == edge_d and odds_d > 0:
+                    bet_amount = self._confidence_adjusted_bet(
+                        prob_d, odds_d, bankroll, confidence_score
+                    )
+                    bets.loc[idx, "BetD"] = bet_amount
+        
+        # Ensure bets are within constraints
+        bets = bets.clip(lower=0)
+        bets[bets < min_bet] = 0
+        bets = bets.clip(upper=max_bet)
+        
+        # Apply maximum bet fraction limit
+        max_single_bet = bankroll * self.max_bet_fraction
+        bets = bets.clip(upper=max_single_bet)
+        
+        # Don't bet more than available bankroll
+        total_bet = bets.sum().sum()
+        if total_bet > bankroll:
+            bets *= (bankroll * 0.95) / total_bet
+            bets[bets < min_bet] = 0
+        
+        return bets
+    
+    def _calculate_confidence(self, prob_h: float, prob_a: float, prob_d: float) -> float:
+        """
+        Calculate confidence score based on probability distribution.
+        
+        Higher confidence when:
+        - One outcome has significantly higher probability than others
+        - Low variance in prediction (not close to 33/33/33)
+        
+        Args:
+            prob_h: Home win probability
+            prob_a: Away win probability
+            prob_d: Draw probability
+            
+        Returns:
+            Confidence score (0-1)
+        """
+        probs = np.array([prob_h, prob_a, prob_d])
+        
+        # Confidence is the margin between highest and second-highest probability
+        sorted_probs = np.sort(probs)
+        confidence_margin = sorted_probs[-1] - sorted_probs[-2]
+        
+        # Penalize high variance (uncertain predictions)
+        variance = np.var(probs)
+        variance_factor = 1.0 - (variance * self.variance_penalty * 10)
+        variance_factor = max(0.0, min(1.0, variance_factor))
+        
+        # Combined confidence score
+        confidence = confidence_margin * variance_factor
+        
+        return confidence
+    
+    def _confidence_adjusted_bet(
+        self,
+        prob: float,
+        odds: float,
+        bankroll: float,
+        confidence: float
+    ) -> float:
+        """
+        Calculate bet size with confidence adjustment.
+        
+        Args:
+            prob: Estimated probability of winning
+            odds: Decimal odds
+            bankroll: Available bankroll
+            confidence: Confidence score (0-1)
+            
+        Returns:
+            Confidence-adjusted bet amount
+        """
+        if odds <= 1.0 or prob <= 0:
+            return 0.0
+        
+        # Base Kelly calculation
+        b = odds - 1
+        kelly = (b * prob - (1 - prob)) / b
+        
+        if kelly <= 0:
+            return 0.0
+        
+        # Adjust Kelly fraction based on confidence and risk tolerance
+        # Higher confidence -> larger bets (up to kelly_fraction)
+        # Lower confidence -> smaller bets
+        confidence_multiplier = confidence * self.risk_factor
+        adjusted_kelly_fraction = self.kelly_fraction * confidence_multiplier
+        
+        # Apply fractional Kelly
+        bet_fraction = kelly * adjusted_kelly_fraction
+        bet_amount = bankroll * bet_fraction
+        
+        # Track confidence history
+        self.confidence_history.append(confidence)
+        if len(self.confidence_history) > 100:
+            self.confidence_history.pop(0)
+        
+        return max(0, bet_amount)
+
+
 # For backward compatibility, create a Model class that uses EloModel
 class Model(EloModel):
     """Default model for submission - uses Elo-based betting."""

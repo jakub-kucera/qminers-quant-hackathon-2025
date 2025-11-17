@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, Type
 import logging
 
 from environment import Environment
-from models import BaseModel, EloModel, AdvancedEloModel
+from models import BaseModel, EloModel, AdvancedEloModel, ConfidenceBasedEloModel
 
 
 # Configure logging
@@ -188,6 +188,13 @@ class OptunaHyperparameterTuner:
             # Add AdvancedEloModel specific parameters
             if self.model_class == AdvancedEloModel:
                 params["score_weight"] = trial.suggest_float("score_weight", 0.0, 0.3)
+            
+            # Add ConfidenceBasedEloModel specific parameters
+            if self.model_class == ConfidenceBasedEloModel:
+                params["confidence_threshold"] = trial.suggest_float("confidence_threshold", 0.05, 0.30)
+                params["risk_factor"] = trial.suggest_float("risk_factor", 0.2, 1.0)
+                params["variance_penalty"] = trial.suggest_float("variance_penalty", 0.0, 0.5)
+                params["max_bet_fraction"] = trial.suggest_float("max_bet_fraction", 0.05, 0.20)
             
             return params
         else:
