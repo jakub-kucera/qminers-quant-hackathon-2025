@@ -108,7 +108,7 @@ class ModelOptimizer:
         return Model(**params)
     
     def _evaluate_model(self, model):
-        """Evaluate model on validation set"""
+        """Evaluate model on validation set - focuses on prediction accuracy only"""
         # Create environment
         env = Environment(
             self.games.copy(),
@@ -131,22 +131,44 @@ class ModelOptimizer:
                 continue
             
             summary = env._generate_summary(date)
-            bets = model.place_bets(summary, opps, inc)
             
-            # Track validation predictions
+            # Process incremental data to update model state
+            for idx in inc.index:
+                current = inc.loc[idx]
+                model._game_increment(idx, current)
+            
+            # Make predictions for ALL games in validation period (not just bets)
             if date >= self.val_start:
                 for idx in opps.index:
-                    if idx in model.prediction_map:
-                        game = self.games.loc[idx]
-                        pred = model.prediction_map[idx]
+                    current = opps.loc[idx]
+                    season = current['Season']
+                    game_date = current['Date']
+                    home_id = current['HID']
+                    away_id = current['AID']
+                    
+                    # Only predict if ensemble is trained
+                    if len(model.past_pred) >= model.ensamble_required_n:
+                        input_arr = model._get_input_features(home_id, away_id, season, game_date)
                         
-                        predictions.append({
-                            'pred_home': pred,
-                            'actual_home': game['H']
-                        })
-            
-            validated_bets = env._validate_bets(bets, opps)
-            env._place_bets(date, validated_bets)
+                        if input_arr is not None:
+                            # Retrain ensemble if needed
+                            if model.ensamble_retrain <= 0:
+                                model.ensamble_retrain = model.ensamble_retrain_freq
+                                np_array = np.array(model.past_pred)
+                                sample_weights = np.exp(-0.0003 * np.arange(len(model.past_pred)))
+                                from sklearn.linear_model import LogisticRegression
+                                model.ensamble = LogisticRegression(max_iter=10000)
+                                model.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
+                            
+                            # Get prediction from ensemble
+                            pred = model.ensamble.predict_proba(np.array([input_arr]))[0, 1]
+                            
+                            # Store prediction for evaluation
+                            game = self.games.loc[idx]
+                            predictions.append({
+                                'pred_home': pred,
+                                'actual_home': game['H']
+                            })
         
         # Calculate metrics
         return self._calculate_metrics(predictions)

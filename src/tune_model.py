@@ -109,31 +109,51 @@ class ModelTuner:
             if opps.empty and inc.empty:
                 continue
             
-            summary = env._generate_summary(date)
-            bets = model.place_bets(summary, opps, inc)
+            # Process incremental data to update model state
+            for idx in inc.index:
+                current = inc.loc[idx]
+                model._game_increment(idx, current)
             
             # Track predictions made during validation period
+            # Make predictions for ALL games (not dependent on betting)
             if date >= split['val_start'] and date < split['val_end']:
                 for idx in opps.index:
-                    if idx in model.prediction_map:
-                        game = self.games.loc[idx]
-                        pred = model.prediction_map[idx]
+                    current = opps.loc[idx]
+                    season = current['Season']
+                    game_date = current['Date']
+                    home_id = current['HID']
+                    away_id = current['AID']
+                    
+                    # Only predict if ensemble is trained
+                    if len(model.past_pred) >= model.ensamble_required_n:
+                        input_arr = model._get_input_features(home_id, away_id, season, game_date)
                         
-                        predictions.append({
-                            'date': game['Date'],
-                            'home_id': game['HID'],
-                            'away_id': game['AID'],
-                            'pred_home': pred,
-                            'actual_home': game['H'],
-                            'actual_away': game['A'],
-                            'actual_draw': game['D'],
-                            'odds_home': game['OddsH'],
-                            'odds_away': game['OddsA'],
-                            'odds_draw': game['OddsD']
-                        })
-            
-            validated_bets = env._validate_bets(bets, opps)
-            env._place_bets(date, validated_bets)
+                        if input_arr is not None:
+                            # Retrain ensemble if needed
+                            if model.ensamble_retrain <= 0:
+                                model.ensamble_retrain = model.ensamble_retrain_freq
+                                from sklearn.linear_model import LogisticRegression
+                                np_array = np.array(model.past_pred)
+                                sample_weights = np.exp(-0.0003 * np.arange(len(model.past_pred)))
+                                model.ensamble = LogisticRegression(max_iter=10000)
+                                model.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
+                            
+                            # Get prediction from ensemble
+                            pred = model.ensamble.predict_proba(np.array([input_arr]))[0, 1]
+                            
+                            game = self.games.loc[idx]
+                            predictions.append({
+                                'date': game['Date'],
+                                'home_id': game['HID'],
+                                'away_id': game['AID'],
+                                'pred_home': pred,
+                                'actual_home': game['H'],
+                                'actual_away': game['A'],
+                                'actual_draw': game['D'],
+                                'odds_home': game['OddsH'],
+                                'odds_away': game['OddsA'],
+                                'odds_draw': game['OddsD']
+                            })
         
         # Calculate metrics
         metrics = self._calculate_metrics(predictions)
