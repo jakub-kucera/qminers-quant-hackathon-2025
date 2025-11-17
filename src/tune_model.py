@@ -360,14 +360,15 @@ def main():
     tuner = ModelTuner()
     
     # Example: Grid search over model parameters
-    # You can add parameters from your Model class here
+    # Start with a coarse grid on most impactful parameters
     param_grid = {
-        # Example parameters - adjust based on what you want to tune
-        # 'ensamble_required_n': [300, 500, 700],
-        # Add more parameters as needed
+        'ensamble_required_n': [300, 500, 700],
+        'pythagorean_power': [0.8, 1.0, 1.2],
+        'elo_k_base': [12, 15, 18],
+        'exhaustion_b2b_penalty': [1.2, 1.5, 1.8],
     }
     
-    # For now, just use default parameters
+    # For quick testing, use default parameters
     default_params = {}
     
     print("Running cross-validation with default parameters...")
@@ -379,10 +380,11 @@ def main():
     for key, value in cv_results.items():
         print(f"{key}: {value:.4f}")
     
-    # Optionally run grid search
+    # Optionally run grid search (uncomment to use)
+    # print("\nRunning grid search...")
     # best_params, all_results = tuner.grid_search(Model, param_grid, n_folds=3)
     
-    # Final evaluation
+    # Final evaluation (uncomment to use)
     # test_metrics, predictions = tuner.evaluate_on_test_set(Model, default_params)
 
 

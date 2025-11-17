@@ -21,7 +21,17 @@ def sigmoid(x):
 
 class Exhaustion:
     """Tracks team rest days and fatigue with hockey-specific factors"""
-    def __init__(self):
+    def __init__(self, b2b_penalty=1.5, one_day_penalty=0.8, road_trip_penalty=0.5):
+        """
+        Args:
+            b2b_penalty: Penalty factor for back-to-back games (0 days rest)
+            one_day_penalty: Penalty factor for 1 day rest
+            road_trip_penalty: Penalty factor for long road trips (3+ away games)
+        """
+        self.b2b_penalty = b2b_penalty
+        self.one_day_penalty = one_day_penalty
+        self.road_trip_penalty = road_trip_penalty
+        
         self.team_rest = {}
         self.team_games = defaultdict(list)  # Track game history for road trip detection
         
@@ -59,9 +69,9 @@ class Exhaustion:
         
         # Penalize teams on long road trips (3+ away games)
         if consecutive_away >= 3:
-            return -0.5
+            return -self.road_trip_penalty
         elif consecutive_away >= 2:
-            return -0.3
+            return -self.road_trip_penalty * 0.6
         return 0.0
 
     def get_input_data(self, home_id, away_id, date):
@@ -74,14 +84,14 @@ class Exhaustion:
         # Back-to-back penalty (major fatigue factor in NHL)
         factor = 0.0
         if home_days == 0:  # Back-to-back for home team
-            factor += 1.5
+            factor += self.b2b_penalty
         elif home_days == 1:
-            factor += 0.8
+            factor += self.one_day_penalty
             
         if away_days == 0:  # Back-to-back for away team
-            factor -= 1.5
+            factor -= self.b2b_penalty
         elif away_days == 1:
-            factor -= 0.8
+            factor -= self.one_day_penalty
         
         # Road trip fatigue
         home_road_factor = self._get_road_trip_factor(home_id, date)
@@ -94,8 +104,14 @@ class Exhaustion:
 
 class HockeyFourFactor:
     """Four-factor model adapted for ice hockey statistics"""
-    def __init__(self):
-        self.lr_required_n = 500  # Reduced from 2000 for faster startup
+    def __init__(self, lr_required_n=500, daily_decay=0.994):
+        """
+        Args:
+            lr_required_n: Minimum number of games required before making predictions
+            daily_decay: Daily decay factor for time-weighted statistics (0.994 = ~99.4% per day)
+        """
+        self.lr_required_n = lr_required_n
+        self.daily_decay = daily_decay
         self.team_stats_average = defaultdict(list)
         self.opponent_stats_average = defaultdict(list)
         self.past_pred = []
@@ -117,7 +133,7 @@ class HockeyFourFactor:
         }
         
         for stat in stats:
-            weight = 0.994 ** abs((date - stat['Date']).days)
+            weight = self.daily_decay ** abs((date - stat['Date']).days)
             
             totals['ShotsOnGoal'] += stat['ShotsOnGoal'] * weight
             totals['Goals'] += stat['Goals'] * weight
@@ -288,16 +304,29 @@ class HockeyFourFactor:
 
 class GradientDescent:
     """Gradient descent based team rating system"""
-    def __init__(self, num_teams=50, monthly_decay=0.8, long_term_decay=0.97):
+    def __init__(self, num_teams=50, monthly_decay=0.8, long_term_decay=0.97, 
+                 home_advantage=0.3, goal_variance=1.5, max_epochs=12, min_games=500):
+        """
+        Args:
+            num_teams: Maximum number of unique teams to track
+            monthly_decay: Decay factor for monthly time weighting
+            long_term_decay: Decay factor for long-term weighting
+            home_advantage: Initial home ice advantage parameter
+            goal_variance: Initial goal variance (sigma) parameter
+            max_epochs: Maximum training epochs per fit
+            min_games: Minimum games before making predictions
+        """
         self.num_teams = num_teams
         self.monthly_decay = monthly_decay
         self.long_term_decay = long_term_decay
+        self.max_epochs = max_epochs
+        self.min_games = min_games
         
         self.team_mus = nn.Parameter(torch.zeros(num_teams))
         self.team_sigmas = torch.ones(num_teams) * 40
         self.team_home_advantages = torch.ones(num_teams) * 0
-        self.home_advantage = nn.Parameter(torch.tensor(0.3))  # Ice hockey home advantage
-        self.sigma = nn.Parameter(torch.tensor(1.5))  # Goal variance
+        self.home_advantage = nn.Parameter(torch.tensor(home_advantage))
+        self.sigma = nn.Parameter(torch.tensor(goal_variance))
         
         self.games = torch.zeros((50000, 5), dtype=torch.long)
         self.game_count = 0
@@ -345,7 +374,10 @@ class GradientDescent:
                      - 0.5 * torch.log(torch.tensor(2 * np.pi)))
         return torch.sum(log_value * weights[idx_start:])
 
-    def _fit(self, max_epochs=12):  # Reduced from 24
+    def _fit(self, max_epochs=None):
+        if max_epochs is None:
+            max_epochs = self.max_epochs
+            
         weights = self._get_time_weights()
         long_term_weights = self._get_long_term_weights()
         idx_start = torch.nonzero(weights > 0.004, as_tuple=True)[0][0].item()
@@ -392,7 +424,7 @@ class GradientDescent:
     def get_input_data(self, home_id, away_id, season, date):
         self._check_season(season)
         
-        if self.game_count < 500:  # Reduced from 2000
+        if self.game_count < self.min_games:
             return None
         
         if self.fit_date is None or self.fit_date != date:
@@ -414,13 +446,28 @@ class GradientDescent:
 
 class NateSilverElo:
     """Nate Silver's ELO rating system adapted for hockey"""
-    def __init__(self):
+    def __init__(self, k_base=15, home_advantage=35, ot_multiplier=0.7, 
+                 margin_cap=3, season_carryover=0.75):
+        """
+        Args:
+            k_base: Base K-factor for ELO updates (lower = more stable)
+            home_advantage: Home ice advantage in ELO points (~35 for NHL)
+            ot_multiplier: Multiplier for OT/SO wins (partial wins)
+            margin_cap: Maximum goal differential to consider (ignores blowouts)
+            season_carryover: Fraction of ELO to carry over to new season
+        """
+        self.k_base = k_base
+        self.home_advantage = home_advantage
+        self.ot_multiplier = ot_multiplier
+        self.margin_cap = margin_cap
+        self.season_carryover = season_carryover
+        
         self.elo_map = defaultdict(float)
         self.last_season = -1
 
     def _new_season(self):
         for key in self.elo_map:
-            self.elo_map[key] *= 0.75
+            self.elo_map[key] *= self.season_carryover
 
     def _win_probability(self, x):
         return 1 / (1 + (math.exp(-x / 175)))
@@ -438,33 +485,33 @@ class NateSilverElo:
             self._new_season()
         
         # Home ice advantage ~55% in NHL (lower than basketball)
-        home_prediction = self._win_probability(self.elo_map[home_id] + 35 - self.elo_map[away_id])
+        home_prediction = self._win_probability(self.elo_map[home_id] + self.home_advantage - self.elo_map[away_id])
         away_prediction = 1 - home_prediction
         
-        k_factor = self.get_k_factor(home_score - away_score, self.elo_map[home_id] + 35, self.elo_map[away_id])
+        k_factor = self.get_k_factor(home_score - away_score, self.elo_map[home_id] + self.home_advantage, self.elo_map[away_id])
         
         # Reduce rating change for OT/SO wins (they indicate evenly matched teams)
-        ot_so_multiplier = 0.7 if is_ot_or_so else 1.0
+        ot_so_mult = self.ot_multiplier if is_ot_or_so else 1.0
         
-        self.elo_map[home_id] += k_factor * ot_so_multiplier * (current['H'] - home_prediction)
-        self.elo_map[away_id] += k_factor * ot_so_multiplier * (current['A'] - away_prediction)
+        self.elo_map[home_id] += k_factor * ot_so_mult * (current['H'] - home_prediction)
+        self.elo_map[away_id] += k_factor * ot_so_mult * (current['A'] - away_prediction)
 
     def get_input_data(self, home_id, away_id, season):
         if season > self.last_season:
             self.last_season = season
             self._new_season()
         
-        return [self.elo_map[home_id] - self.elo_map[away_id] + 35]
+        return [self.elo_map[home_id] - self.elo_map[away_id] + self.home_advantage]
 
     def get_k_factor(self, score_difference, elo_home, elo_away):
         # Lower K-factor for hockey (35-40 vs basketball's 50-60)
-        # Cap margin-of-victory at 3 goals (garbage time goals don't matter)
-        capped_diff = max(-3, min(3, score_difference))
+        # Cap margin-of-victory at margin_cap goals (garbage time goals don't matter)
+        capped_diff = max(-self.margin_cap, min(self.margin_cap, score_difference))
         
         if capped_diff > 0:
-            return 15 * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_home - elo_away))
+            return self.k_base * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_home - elo_away))
         else:
-            return 15 * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_away - elo_home))
+            return self.k_base * (abs(capped_diff) + 3) ** 0.8 / (7.5 + 0.006 * (elo_away - elo_home))
 
 
 class Pythagorean:
@@ -582,18 +629,78 @@ class PoissonGoalModel:
 class Model:
     """Main ensemble model for ice hockey betting"""
     
-    def __init__(self):
-        # Initialize sub-models
+    def __init__(self, 
+                 # Ensemble parameters
+                 ensamble_required_n=500,
+                 ensamble_retrain_freq=400,
+                 # Sub-model parameters
+                 pythagorean_power=1.0,
+                 pythagorean_regularization=20,
+                 pythagorean_decay=0.992,
+                 four_factor_required_n=500,
+                 four_factor_decay=0.994,
+                 gradient_descent_epochs=12,
+                 gradient_descent_min_games=500,
+                 exhaustion_b2b_penalty=1.5,
+                 exhaustion_road_penalty=0.5,
+                 elo_k_base=15,
+                 elo_home_advantage=35,
+                 elo_margin_cap=3,
+                 poisson_regularization=3.0,
+                 poisson_decay=0.992):
+        """
+        Initialize the ensemble model with configurable hyperparameters.
+        
+        Args:
+            ensamble_required_n: Minimum predictions before ensemble trains
+            ensamble_retrain_freq: How often to retrain the ensemble
+            pythagorean_power: Exponent for Pythagorean expectation (1.0 = linear)
+            pythagorean_regularization: Regularization for goal totals
+            pythagorean_decay: Daily decay factor for Pythagorean
+            four_factor_required_n: Min games for Four Factor predictions
+            four_factor_decay: Daily decay for Four Factor stats
+            gradient_descent_epochs: Training epochs per fit
+            gradient_descent_min_games: Min games before GD predictions
+            exhaustion_b2b_penalty: Back-to-back penalty multiplier
+            exhaustion_road_penalty: Road trip penalty multiplier
+            elo_k_base: Base ELO K-factor
+            elo_home_advantage: Home ice advantage in ELO points
+            elo_margin_cap: Maximum goal differential to consider
+            poisson_regularization: Regularization for Poisson model
+            poisson_decay: Daily decay for Poisson rates
+        """
+        # Initialize sub-models with parameters
         self.model_list = [
-            Pythagorean(),
-            HockeyFourFactor(),
-            GradientDescent(),
-            Exhaustion(),
-            NateSilverElo(),
-            PoissonGoalModel()
+            Pythagorean(
+                power=pythagorean_power,
+                regularization=pythagorean_regularization,
+                daily_decay=pythagorean_decay
+            ),
+            HockeyFourFactor(
+                lr_required_n=four_factor_required_n,
+                daily_decay=four_factor_decay
+            ),
+            GradientDescent(
+                max_epochs=gradient_descent_epochs,
+                min_games=gradient_descent_min_games
+            ),
+            Exhaustion(
+                b2b_penalty=exhaustion_b2b_penalty,
+                road_trip_penalty=exhaustion_road_penalty
+            ),
+            NateSilverElo(
+                k_base=elo_k_base,
+                home_advantage=elo_home_advantage,
+                margin_cap=elo_margin_cap
+            ),
+            PoissonGoalModel(
+                regularization=poisson_regularization,
+                daily_decay=poisson_decay
+            )
         ]
         
-        self.ensamble_required_n = 500  # Reduced from 2000 for faster startup
+        self.ensamble_required_n = ensamble_required_n
+        self.ensamble_retrain_freq = ensamble_retrain_freq
         self.past_pred = []
         self.ensamble = None
         self.ensamble_retrain = 0
@@ -674,7 +781,7 @@ class Model:
                 if input_arr is not None:
                     # Retrain ensemble if needed
                     if self.ensamble_retrain <= 0:
-                        self.ensamble_retrain = 400
+                        self.ensamble_retrain = self.ensamble_retrain_freq
                         np_array = np.array(self.past_pred)
                         sample_weights = np.exp(-0.0003 * np.arange(len(self.past_pred)))
                         self.ensamble = LogisticRegression(max_iter=10000)

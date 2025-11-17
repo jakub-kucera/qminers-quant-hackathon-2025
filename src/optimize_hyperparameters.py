@@ -52,15 +52,35 @@ class ModelOptimizer:
         Returns:
             Metric to optimize (we'll use negative log-loss, so higher is better)
         """
-        # Suggest hyperparameters
-        # These are parameters you can tune in your model
+        # Suggest hyperparameters - focusing on most impactful ones
         params = {
+            # Ensemble parameters
             'ensamble_required_n': trial.suggest_int('ensamble_required_n', 300, 1000, step=100),
-            # Add more tunable parameters from your Model class
-            # Examples:
-            # 'pythagorean_power': trial.suggest_float('pythagorean_power', 0.8, 1.5),
-            # 'elo_k_factor': trial.suggest_int('elo_k_factor', 10, 25),
-            # etc.
+            'ensamble_retrain_freq': trial.suggest_int('ensamble_retrain_freq', 200, 800, step=100),
+            
+            # Pythagorean model
+            'pythagorean_power': trial.suggest_float('pythagorean_power', 0.8, 1.5),
+            'pythagorean_regularization': trial.suggest_int('pythagorean_regularization', 10, 40, step=5),
+            
+            # Four Factor model
+            'four_factor_required_n': trial.suggest_int('four_factor_required_n', 300, 1000, step=100),
+            'four_factor_decay': trial.suggest_float('four_factor_decay', 0.990, 0.998),
+            
+            # Gradient Descent
+            'gradient_descent_epochs': trial.suggest_int('gradient_descent_epochs', 8, 20),
+            'gradient_descent_min_games': trial.suggest_int('gradient_descent_min_games', 300, 800, step=100),
+            
+            # Exhaustion model
+            'exhaustion_b2b_penalty': trial.suggest_float('exhaustion_b2b_penalty', 1.0, 2.5),
+            'exhaustion_road_penalty': trial.suggest_float('exhaustion_road_penalty', 0.3, 0.8),
+            
+            # ELO system
+            'elo_k_base': trial.suggest_int('elo_k_base', 10, 25),
+            'elo_home_advantage': trial.suggest_int('elo_home_advantage', 25, 50, step=5),
+            'elo_margin_cap': trial.suggest_int('elo_margin_cap', 2, 5),
+            
+            # Poisson model
+            'poisson_regularization': trial.suggest_float('poisson_regularization', 2.0, 5.0),
         }
         
         try:
@@ -84,18 +104,7 @@ class ModelOptimizer:
     
     def _create_model_with_params(self, params):
         """Create a model instance with given parameters"""
-        # For now, Model() doesn't take parameters
-        # You'll need to modify this to pass parameters to your model
-        # For example:
-        # return Model(ensamble_required_n=params['ensamble_required_n'])
-        
-        model = Model()
-        
-        # Set parameters after initialization
-        if 'ensamble_required_n' in params:
-            model.ensamble_required_n = params['ensamble_required_n']
-        
-        return model
+        return Model(**params)
     
     def _evaluate_model(self, model):
         """Evaluate model on validation set"""
