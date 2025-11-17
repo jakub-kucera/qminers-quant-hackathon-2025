@@ -72,31 +72,65 @@ test_metrics = tuner.evaluate_on_test_set(Model, best_params)
 
 ### 3. `optimize_hyperparameters.py` - Optuna Optimization
 
-Advanced hyperparameter optimization using Bayesian methods.
+Advanced hyperparameter optimization using Bayesian methods with parallel execution support.
 
 **Usage:**
 ```bash
+# Sequential execution (default)
 python3 src/optimize_hyperparameters.py
+
+# Parallel execution with 4 workers
+python3 src/optimize_hyperparameters.py --n-jobs 4
+
+# Use all available CPUs
+python3 src/optimize_hyperparameters.py --n-jobs -1
+
+# More trials with parallel execution
+python3 src/optimize_hyperparameters.py --n-trials 100 --n-jobs 4
+
+# Custom study name and storage
+python3 src/optimize_hyperparameters.py --study-name my_optimization --n-jobs 4
 ```
+
+**Command-line Options:**
+- `--n-trials`: Number of trials (default: 50)
+- `--n-jobs`: Parallel workers (1=sequential, -1=all CPUs, default: 1)
+- `--study-name`: Study identifier (default: hockey_model_optimization)
+- `--storage`: Database URL (auto-generated for parallel execution)
+- `--validation-period`: Validation days (default: 365)
 
 **Features:**
 - Bayesian optimization (more efficient than grid search)
 - Automatic hyperparameter suggestion
+- Parallel execution across multiple CPU cores
 - Progress tracking
 - Saves best parameters
+- Persistent storage via SQLite
 
 **Requirements:**
 ```bash
 pip install optuna
 ```
 
-**Example:**
+**Example (Python API):**
 ```python
 from src.optimize_hyperparameters import ModelOptimizer
 
 optimizer = ModelOptimizer(validation_period=365)
+
+# Sequential execution
 best_params = optimizer.optimize(n_trials=100)
+
+# Parallel execution with 4 workers
+best_params = optimizer.optimize(n_trials=100, n_jobs=4, storage='sqlite:///optuna.db')
 ```
+
+**Parallel Execution Notes:**
+- Parallel execution requires a shared storage backend (SQLite auto-generated)
+- Each worker evaluates trials independently and shares results via database
+- Speed-up is approximately linear with number of workers (up to CPU count)
+- Use `--n-jobs -1` to automatically use all available CPU cores
+- For 100+ trials, parallel execution can provide 3-4x speedup on 4 cores
 
 ## Workflow
 
@@ -124,7 +158,11 @@ best_params, results = tuner.grid_search(Model, param_grid, n_folds=3)
 
 #### Option B: Bayesian Optimization (recommended)
 ```bash
-python3 src/optimize_hyperparameters.py
+# Sequential (for quick testing)
+python3 src/optimize_hyperparameters.py --n-trials 50
+
+# Parallel (for production runs)
+python3 src/optimize_hyperparameters.py --n-trials 200 --n-jobs 4
 ```
 
 ### Phase 3: Final Evaluation

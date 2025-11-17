@@ -1,6 +1,6 @@
 """
 Hyperparameter optimization using Optuna for ice hockey betting model.
-Optimizes model accuracy metrics.
+Optimizes model accuracy metrics with parallel execution support.
 """
 import json
 import pandas as pd
@@ -8,6 +8,7 @@ import numpy as np
 from datetime import datetime
 import optuna
 from optuna.samplers import TPESampler
+import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -187,13 +188,16 @@ class ModelOptimizer:
             'brier_score': brier_score / n
         }
     
-    def optimize(self, n_trials=50, study_name='hockey_model_optimization'):
+    def optimize(self, n_trials=50, study_name='hockey_model_optimization', n_jobs=1, storage=None):
         """
-        Run optimization
+        Run optimization with optional parallel execution
         
         Args:
             n_trials: Number of trials to run
             study_name: Name for the study
+            n_jobs: Number of parallel jobs (-1 for all CPUs, 1 for sequential)
+            storage: Optuna storage URL (e.g., 'sqlite:///optuna_study.db')
+                    Required for n_jobs > 1
         
         Returns:
             Best parameters
@@ -203,17 +207,35 @@ class ModelOptimizer:
         print(f"{'='*60}")
         print(f"Trials: {n_trials}")
         print(f"Study: {study_name}")
+        print(f"Parallel jobs: {n_jobs if n_jobs > 0 else 'all CPUs'}")
+        
+        # Setup storage for parallel execution
+        if n_jobs != 1 and storage is None:
+            storage = f'sqlite:///{study_name}.db'
+            print(f"Storage: {storage}")
         
         # Create study
         study = optuna.create_study(
             study_name=study_name,
             direction='maximize',  # Maximize negative log-loss
             sampler=TPESampler(seed=42),
+            storage=storage,
             load_if_exists=True
         )
         
-        # Optimize
-        study.optimize(self.objective, n_trials=n_trials, show_progress_bar=True)
+        # Optimize with parallel execution
+        if n_jobs == 1:
+            # Sequential execution
+            study.optimize(self.objective, n_trials=n_trials, show_progress_bar=True)
+        else:
+            # Parallel execution
+            print(f"\nRunning {n_trials} trials across {n_jobs if n_jobs > 0 else 'all'} workers...")
+            study.optimize(
+                self.objective,
+                n_trials=n_trials,
+                n_jobs=n_jobs,
+                show_progress_bar=True
+            )
         
         # Print results
         print(f"\n{'='*60}")
@@ -260,11 +282,53 @@ class ModelOptimizer:
 
 
 def main():
-    """Run optimization"""
-    optimizer = ModelOptimizer(validation_period=365)
+    """Run optimization with command-line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Optimize hockey betting model hyperparameters with parallel execution support'
+    )
+    parser.add_argument(
+        '--n-trials',
+        type=int,
+        default=50,
+        help='Number of optimization trials (default: 50)'
+    )
+    parser.add_argument(
+        '--n-jobs',
+        type=int,
+        default=1,
+        help='Number of parallel jobs. Use -1 for all CPUs, 1 for sequential (default: 1)'
+    )
+    parser.add_argument(
+        '--study-name',
+        type=str,
+        default='hockey_model_optimization',
+        help='Name for the Optuna study (default: hockey_model_optimization)'
+    )
+    parser.add_argument(
+        '--storage',
+        type=str,
+        default=None,
+        help='Optuna storage URL (e.g., sqlite:///optuna.db). Auto-generated if n-jobs > 1'
+    )
+    parser.add_argument(
+        '--validation-period',
+        type=int,
+        default=365,
+        help='Validation period in days (default: 365)'
+    )
     
-    # Run optimization with 50 trials (adjust as needed)
-    best_params = optimizer.optimize(n_trials=50)
+    args = parser.parse_args()
+    
+    # Initialize optimizer
+    optimizer = ModelOptimizer(validation_period=args.validation_period)
+    
+    # Run optimization
+    best_params = optimizer.optimize(
+        n_trials=args.n_trials,
+        study_name=args.study_name,
+        n_jobs=args.n_jobs,
+        storage=args.storage
+    )
     
     print(f"\n{'='*60}")
     print("FINAL BEST PARAMETERS")
