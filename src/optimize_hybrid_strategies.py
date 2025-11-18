@@ -145,7 +145,7 @@ class HybridStrategyOptimizer:
         env = Environment(
             model=model,
             games=self.train_games,
-            initial_bankroll=self.initial_bankroll,
+            init_bankroll=self.initial_bankroll,
         )
         
         if self.silent:
@@ -221,7 +221,7 @@ class HybridStrategyOptimizer:
         env = Environment(
             model=model,
             games=self.test_games,
-            initial_bankroll=self.initial_bankroll,
+            init_bankroll=self.initial_bankroll,
         )
         
         if self.silent:
@@ -381,7 +381,7 @@ if __name__ == "__main__":
     
     # Load games data
     print(f"Loading data from: {args.data}")
-    games_data = pd.read_csv(args.data, parse_dates=['Date'])
+    games_data = pd.read_csv(args.data, parse_dates=['Date', 'Open'])
     print(f"Loaded {len(games_data)} games")
     
     if args.all:

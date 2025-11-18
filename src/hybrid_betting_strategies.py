@@ -56,23 +56,41 @@ class HybridValueKellyStrategy(EloModel):
         self.confidence_threshold = confidence_threshold
     
     def place_bets(
-        self, games: pd.DataFrame, bankroll: float, min_bet: float = 10
-    ) -> np.ndarray:
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
         """
         Place bets using hybrid Value-Kelly approach
+        
+        Args:
+            summary: Summary DataFrame with bankroll and betting constraints
+            opps: Opportunities DataFrame with available betting options
+            inc: Incremental games DataFrame with recent game results
+            
+        Returns:
+            DataFrame with bet amounts for each opportunity
         """
-        n_games = len(games)
+        if opps.empty:
+            return pd.DataFrame()
+        
+        # Get bankroll from summary
+        bankroll = summary["Bankroll"].iloc[0] if not summary.empty else 1000.0
+        min_bet = summary.get("MinBet", pd.Series([10])).iloc[0] if not summary.empty else 10.0
+        
+        n_games = len(opps)
         bets = np.zeros((n_games, 3))  # [home, draw, away]
         
-        for i, (_, game) in enumerate(games.iterrows()):
-            home_id = game["HomeTeam"]
-            away_id = game["AwayTeam"]
+        for i, (_, game) in enumerate(opps.iterrows()):
+            home_id = game["HID"]
+            away_id = game["AID"]
             
             # Get probabilities
-            probs = self._get_probabilities(home_id, away_id)
+            probs = self._calculate_probabilities(home_id, away_id)
             
             # Get odds
-            odds = [game.get("B365H", 0), game.get("B365D", 0), game.get("B365A", 0)]
+            odds = [game.get("OddsH", 0), game.get("OddsD", 0), game.get("OddsA", 0)]
             if any(o == 0 for o in odds):
                 continue
             
@@ -114,7 +132,13 @@ class HybridValueKellyStrategy(EloModel):
             bets *= (bankroll * 0.95) / total_bet
             bets[bets < min_bet] = 0
         
-        return bets
+        # Convert to DataFrame matching EloModel format
+        bet_df = pd.DataFrame(
+            bets,
+            index=opps.index,
+            columns=["H", "D", "A"]
+        )
+        return bet_df
     
     def _calculate_confidence(
         self, probs: List[float], home_id: str, away_id: str
@@ -189,9 +213,28 @@ class AdaptiveHybridStrategy(EloModel):
         self.mode = "aggressive"  # Start aggressive
     
     def place_bets(
-        self, games: pd.DataFrame, bankroll: float, min_bet: float = 10
-    ) -> np.ndarray:
-        """Place bets with adaptive strategy switching"""
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """
+        Place bets with adaptive strategy switching
+        
+        Args:
+            summary: Summary DataFrame with bankroll and betting constraints
+            opps: Opportunities DataFrame with available betting options
+            inc: Incremental games DataFrame with recent game results
+            
+        Returns:
+            DataFrame with bet amounts for each opportunity
+        """
+        if opps.empty:
+            return pd.DataFrame()
+        
+        # Get bankroll from summary
+        bankroll = summary["Bankroll"].iloc[0] if not summary.empty else 1000.0
+        min_bet = summary.get("MinBet", pd.Series([10])).iloc[0] if not summary.empty else 10.0
         
         # Initialize tracking
         if self.initial_bankroll is None:
@@ -213,18 +256,18 @@ class AdaptiveHybridStrategy(EloModel):
             self.kelly_fraction = self.aggressive_kelly
         
         # Place bets using parent logic with adjusted parameters
-        bets = super().place_bets(games, bankroll, min_bet)
+        bets = super().place_bets(summary, opps, inc)
         
         return bets
     
     def update(self, game: Dict[str, Any]):
         """Update model and track results"""
         # Track result before updating
-        home_id = game["HomeTeam"]
-        away_id = game["AwayTeam"]
+        home_id = game["HID"]
+        away_id = game["AID"]
         
-        home_score = game.get("FTHG", 0)
-        away_score = game.get("FTAG", 0)
+        home_score = game.get("HS", 0)
+        away_score = game.get("AS", 0)
         
         # Determine outcome
         if home_score > away_score:
@@ -235,7 +278,7 @@ class AdaptiveHybridStrategy(EloModel):
             result = "draw"
         
         # Get our prediction
-        probs = self._get_probabilities(home_id, away_id)
+        probs = self._calculate_probabilities(home_id, away_id)
         predicted = ["home", "draw", "away"][np.argmax(probs)]
         
         # Track if we were correct
@@ -321,32 +364,57 @@ class EnsembleStrategy(EloModel):
         self.strategy_performance = {k: [] for k in self.strategies.keys()}
     
     def place_bets(
-        self, games: pd.DataFrame, bankroll: float, min_bet: float = 10
-    ) -> np.ndarray:
-        """Place bets using ensemble of strategies"""
+        self,
+        summary: pd.DataFrame,
+        opps: pd.DataFrame,
+        inc: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """
+        Place bets using ensemble of strategies
+        
+        Args:
+            summary: Summary DataFrame with bankroll and betting constraints
+            opps: Opportunities DataFrame with available betting options
+            inc: Incremental games DataFrame with recent game results
+            
+        Returns:
+            DataFrame with bet amounts for each opportunity
+        """
+        if opps.empty:
+            return pd.DataFrame()
         
         # Get bets from each strategy
         strategy_bets = {}
         for name, strategy in self.strategies.items():
             # Sync ratings with main model
-            strategy.team_ratings = self.team_ratings.copy()
+            strategy.ratings = self.ratings.copy()
             strategy.team_form = {k: list(v) for k, v in self.team_form.items()}
             strategy.team_streaks = self.team_streaks.copy()
             
-            strategy_bets[name] = strategy.place_bets(games, bankroll, min_bet)
+            strategy_bets[name] = strategy.place_bets(summary, opps, inc)
         
         # Weighted combination
-        n_games = len(games)
+        n_games = len(opps)
         combined_bets = np.zeros((n_games, 3))
         
+        # Get bankroll and min_bet from summary
+        bankroll = summary["Bankroll"].iloc[0] if not summary.empty else 1000.0
+        min_bet = summary.get("MinBet", pd.Series([10])).iloc[0] if not summary.empty else 10.0
+        
         for name, bets in strategy_bets.items():
-            combined_bets += bets * self.strategy_weights[name]
+            # Convert DataFrame to numpy if needed
+            if isinstance(bets, pd.DataFrame):
+                bets_array = bets[["H", "D", "A"]].values
+            else:
+                bets_array = bets
+            combined_bets += bets_array * self.strategy_weights[name]
         
         # Apply consensus filter: only bet if multiple strategies agree
         for i in range(n_games):
             # Count how many strategies want to bet on this game
             strategies_betting = sum(
-                1 for bets in strategy_bets.values() if bets[i].sum() > 0
+                1 for bets in strategy_bets.values() 
+                if (bets.iloc[i].sum() if isinstance(bets, pd.DataFrame) else bets[i].sum()) > 0
             )
             
             # Require at least 2 strategies to agree
@@ -362,7 +430,13 @@ class EnsembleStrategy(EloModel):
             combined_bets *= (bankroll * 0.95) / total_bet
             combined_bets[combined_bets < min_bet] = 0
         
-        return combined_bets
+        # Convert to DataFrame matching EloModel format
+        bet_df = pd.DataFrame(
+            combined_bets,
+            index=opps.index,
+            columns=["H", "D", "A"]
+        )
+        return bet_df
     
     def update(self, game: Dict[str, Any]):
         """Update all strategies"""
@@ -405,7 +479,7 @@ def get_hybrid_strategy(
     
     # Initialize with historical data
     for _, game in games_data.iterrows():
-        if "FTHG" in game and "FTAG" in game:
+        if "HS" in game and "AS" in game:
             strategy.update(game)
     
     return strategy
