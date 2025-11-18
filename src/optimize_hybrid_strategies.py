@@ -381,7 +381,7 @@ if __name__ == "__main__":
     
     # Load games data
     print(f"Loading data from: {args.data}")
-    games_data = pd.read_csv(args.data)
+    games_data = pd.read_csv(args.data, parse_dates=['Date'])
     print(f"Loaded {len(games_data)} games")
     
     if args.all:

@@ -330,7 +330,7 @@ def main():
         print(f"Error: Data file not found: {args.data}")
         return
     
-    games_data = pd.read_csv(args.data)
+    games_data = pd.read_csv(args.data, parse_dates=['Date'])
     
     # Run optimization
     optimizer = ContrarianStrategyOptimizer(
