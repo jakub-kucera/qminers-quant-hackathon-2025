@@ -82,6 +82,11 @@ class ModelOptimizer:
             
             # Poisson model
             'poisson_regularization': trial.suggest_float('poisson_regularization', 2.0, 5.0),
+            
+            # Rolling window features (NEW)
+            'rolling_window_short': trial.suggest_int('rolling_window_short', 3, 7),
+            'rolling_window_med': trial.suggest_int('rolling_window_med', 8, 15),
+            'rolling_window_long': trial.suggest_int('rolling_window_long', 16, 25),
         }
         
         try:

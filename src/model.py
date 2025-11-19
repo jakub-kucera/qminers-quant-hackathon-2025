@@ -548,6 +548,134 @@ class Pythagorean:
         ]
 
 
+class RollingWindowFeatures:
+    """Computes rolling window statistics for teams"""
+    def __init__(self, window_short=5, window_med=10, window_long=20):
+        """
+        Args:
+            window_short: Short-term rolling window (e.g., last 5 games)
+            window_med: Medium-term rolling window (e.g., last 10 games)
+            window_long: Long-term rolling window (e.g., last 20 games)
+        """
+        self.window_short = window_short
+        self.window_med = window_med
+        self.window_long = window_long
+        self.team_history = defaultdict(list)  # Store recent game stats
+        
+    def add_game(self, current):
+        """Add game result to history"""
+        home_id = current['HID']
+        away_id = current['AID']
+        date = current['Date']
+        
+        # Extract stats for home team
+        home_stats = {
+            'date': date,
+            'goals_for': current['HS'],
+            'goals_against': current['AS'],
+            'sog_for': current.get('H_SOG', 0) if not pd.isna(current.get('H_SOG')) else 0,
+            'sog_against': current.get('A_SOG', 0) if not pd.isna(current.get('A_SOG')) else 0,
+            'ppg': current.get('H_PPG', 0) if not pd.isna(current.get('H_PPG')) else 0,
+            'pp_opp': current.get('A_PEN', 0) if not pd.isna(current.get('A_PEN')) else 0,
+            'faceoff_wins': current.get('H_FO', 0) if not pd.isna(current.get('H_FO')) else 0,
+            'faceoff_total': (current.get('H_FO', 0) if not pd.isna(current.get('H_FO')) else 0) + 
+                           (current.get('A_FO', 0) if not pd.isna(current.get('A_FO')) else 0),
+            'win': 1 if current['H'] else 0
+        }
+        
+        # Extract stats for away team
+        away_stats = {
+            'date': date,
+            'goals_for': current['AS'],
+            'goals_against': current['HS'],
+            'sog_for': current.get('A_SOG', 0) if not pd.isna(current.get('A_SOG')) else 0,
+            'sog_against': current.get('H_SOG', 0) if not pd.isna(current.get('H_SOG')) else 0,
+            'ppg': current.get('A_PPG', 0) if not pd.isna(current.get('A_PPG')) else 0,
+            'pp_opp': current.get('H_PEN', 0) if not pd.isna(current.get('H_PEN')) else 0,
+            'faceoff_wins': current.get('A_FO', 0) if not pd.isna(current.get('A_FO')) else 0,
+            'faceoff_total': (current.get('H_FO', 0) if not pd.isna(current.get('H_FO')) else 0) + 
+                           (current.get('A_FO', 0) if not pd.isna(current.get('A_FO')) else 0),
+            'win': 1 if current['A'] else 0
+        }
+        
+        self.team_history[home_id].append(home_stats)
+        self.team_history[away_id].append(away_stats)
+        
+        # Keep only last max(window_long) * 1.5 games for efficiency
+        max_keep = int(self.window_long * 1.5)
+        if len(self.team_history[home_id]) > max_keep:
+            self.team_history[home_id] = self.team_history[home_id][-max_keep:]
+        if len(self.team_history[away_id]) > max_keep:
+            self.team_history[away_id] = self.team_history[away_id][-max_keep:]
+    
+    def _compute_window_stats(self, team_id, window_size):
+        """Compute statistics over a rolling window"""
+        if team_id not in self.team_history or len(self.team_history[team_id]) < window_size:
+            return None
+        
+        recent_games = self.team_history[team_id][-window_size:]
+        
+        # Compute averages
+        avg_goals_for = np.mean([g['goals_for'] for g in recent_games])
+        avg_goals_against = np.mean([g['goals_against'] for g in recent_games])
+        avg_sog_for = np.mean([g['sog_for'] for g in recent_games])
+        avg_sog_against = np.mean([g['sog_against'] for g in recent_games])
+        
+        # Power play efficiency
+        total_ppg = sum(g['ppg'] for g in recent_games)
+        total_pp_opp = sum(g['pp_opp'] for g in recent_games)
+        pp_pct = total_ppg / max(total_pp_opp, 0.1)
+        
+        # Faceoff win percentage
+        total_fo_wins = sum(g['faceoff_wins'] for g in recent_games)
+        total_fo_total = sum(g['faceoff_total'] for g in recent_games)
+        fo_win_pct = total_fo_wins / max(total_fo_total, 0.1)
+        
+        # Win percentage
+        win_pct = np.mean([g['win'] for g in recent_games])
+        
+        # Shooting percentage (goals / shots)
+        total_goals = sum(g['goals_for'] for g in recent_games)
+        total_sog = sum(g['sog_for'] for g in recent_games)
+        shooting_pct = total_goals / max(total_sog, 0.1)
+        
+        return [
+            avg_goals_for,
+            avg_goals_against,
+            avg_sog_for,
+            avg_sog_against,
+            pp_pct,
+            fo_win_pct,
+            win_pct,
+            shooting_pct
+        ]
+    
+    def get_input_data(self, home_id, away_id, date):
+        """Get rolling window features for both teams across all window sizes"""
+        features = []
+        
+        # For each window size, compute features for home and away teams
+        for window_size in [self.window_short, self.window_med, self.window_long]:
+            home_stats = self._compute_window_stats(home_id, window_size)
+            away_stats = self._compute_window_stats(away_id, window_size)
+            
+            if home_stats is None or away_stats is None:
+                return None
+            
+            # Add differential features (home - away)
+            features.extend([
+                home_stats[0] - away_stats[0],  # Goal differential
+                home_stats[1] - away_stats[1],  # Goals against differential (inverted)
+                home_stats[2] - away_stats[2],  # SOG differential
+                home_stats[4] - away_stats[4],  # PP% differential
+                home_stats[5] - away_stats[5],  # FO% differential
+                home_stats[6] - away_stats[6],  # Win% differential
+                home_stats[7] - away_stats[7],  # Shooting% differential
+            ])
+        
+        return features
+
+
 class PoissonGoalModel:
     """Poisson model for goal prediction - hockey goals as independent Poisson processes"""
     def __init__(self, regularization=3.0, daily_decay=0.992):
@@ -648,6 +776,10 @@ class Model:
                  elo_margin_cap=5,
                  poisson_regularization=2.6883250153197973,
                  poisson_decay=0.992,
+                 # Rolling window parameters (NEW)
+                 rolling_window_short=5,
+                 rolling_window_med=10,
+                 rolling_window_long=20,
                  # Betting strategy parameters
                  bet_threshold=0.05,
                  bet_size_base=0.03,
@@ -672,6 +804,9 @@ class Model:
             elo_margin_cap: Maximum goal differential to consider
             poisson_regularization: Regularization for Poisson model
             poisson_decay: Daily decay for Poisson rates
+            rolling_window_short: Short-term rolling window size (e.g., 5 games)
+            rolling_window_med: Medium-term rolling window size (e.g., 10 games)
+            rolling_window_long: Long-term rolling window size (e.g., 20 games)
             bet_threshold: Minimum edge over implied odds to place bet (e.g., 0.05 = 5% edge required)
             bet_size_base: Base bet size as fraction of bankroll (e.g., 0.03 = 3% of bankroll)
             bet_kelly_fraction: Kelly criterion fraction for bet sizing (e.g., 0.25 = quarter Kelly)
@@ -703,6 +838,11 @@ class Model:
             PoissonGoalModel(
                 regularization=poisson_regularization,
                 daily_decay=poisson_decay
+            ),
+            RollingWindowFeatures(
+                window_short=rolling_window_short,
+                window_med=rolling_window_med,
+                window_long=rolling_window_long
             )
         ]
         
@@ -725,7 +865,7 @@ class Model:
         for model in self.model_list:
             if isinstance(model, NateSilverElo):
                 data = model.get_input_data(home_id, away_id, season)
-            elif isinstance(model, (Pythagorean, Exhaustion, HockeyFourFactor, PoissonGoalModel)):
+            elif isinstance(model, (Pythagorean, Exhaustion, HockeyFourFactor, PoissonGoalModel, RollingWindowFeatures)):
                 data = model.get_input_data(home_id, away_id, date)
             else:  # GradientDescent
                 data = model.get_input_data(home_id, away_id, season, date)

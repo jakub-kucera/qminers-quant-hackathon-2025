@@ -78,6 +78,10 @@ class BettingOptimizer:
             elo_margin_cap=5,
             poisson_regularization=2.6883250153197973,
             poisson_decay=0.992,
+            # Rolling window parameters (use defaults)
+            rolling_window_short=5,
+            rolling_window_med=10,
+            rolling_window_long=20,
             # Betting strategy parameters (being optimized)
             bet_threshold=bet_threshold,
             bet_size_base=bet_size_base,

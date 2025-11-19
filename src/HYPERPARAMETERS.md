@@ -168,6 +168,39 @@ param_grid = {
 ### Phase 3: Bayesian Optimization
 Use Optuna for final optimization across all parameters simultaneously.
 
+## Rolling Window Features (NEW)
+
+### `rolling_window_short` (default: 5)
+- **What**: Short-term rolling window size for recent game statistics
+- **Range**: 3-7
+- **Impact**: Captures very recent form (last week of games)
+- **Why tunable**: Balance between noise and signal in recent performance
+- **Metrics tracked**: Goals, SOG, PP%, FO%, Win%, Shooting%
+
+### `rolling_window_med` (default: 10)
+- **What**: Medium-term rolling window size
+- **Range**: 8-15
+- **Impact**: Captures recent trend (last 2-3 weeks)
+- **Why tunable**: Optimal window varies with schedule density
+- **Trade-off**: Larger = more stable, smaller = more responsive
+
+### `rolling_window_long` (default: 20)
+- **What**: Long-term rolling window size
+- **Range**: 16-25
+- **Impact**: Captures sustained performance (last month+)
+- **Why tunable**: Balance between seasonal and current form
+- **Note**: Provides baseline for recent changes
+
+**How it works**: For each window size, computes differential features (home - away) for:
+- Goal differential per game
+- Shots on goal differential
+- Power play efficiency differential
+- Faceoff win percentage differential
+- Win percentage differential  
+- Shooting percentage differential
+
+This adds 3 windows × 7 features = 21 additional features to the ensemble.
+
 ## Usage Examples
 
 ### Default Parameters
