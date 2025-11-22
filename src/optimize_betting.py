@@ -1,8 +1,18 @@
 """
 Betting Strategy Hyperparameter Optimization
 
-This script tunes betting strategy parameters (bet_threshold, bet_size_base, bet_kelly_fraction)
-to maximize final bankroll while keeping prediction model hyperparameters fixed.
+This script tunes betting strategy parameters to maximize final bankroll while keeping 
+prediction model hyperparameters fixed.
+
+Optimized parameters:
+    - bet_threshold: Minimum edge required to place bet
+    - bet_size_base: Base bet size as fraction of bankroll
+    - bet_kelly_fraction: Kelly criterion fraction
+    - bet_min_confidence: Minimum probability to consider betting
+    - bet_max_exposure: Maximum total exposure per game
+    - bet_size_max_multiplier: Maximum multiplier on base bet size
+    - use_overround_adjustment: Whether to normalize implied probabilities
+    - confidence_scaling: Whether to scale bets by prediction confidence
 
 Usage:
     python3 src/optimize_betting.py --n-trials 100 --n-jobs 4
@@ -52,7 +62,9 @@ class BettingOptimizer:
         print(f"Training period: up to {self.train_end_date.date()}")
         print(f"Validation period: {self.train_end_date.date()} to {self.val_end_date.date()}")
         
-    def evaluate_betting_strategy(self, bet_threshold, bet_size_base, bet_kelly_fraction):
+    def evaluate_betting_strategy(self, bet_threshold, bet_size_base, bet_kelly_fraction,
+                                  bet_min_confidence, bet_max_exposure, bet_size_max_multiplier,
+                                  use_overround_adjustment, confidence_scaling):
         """
         Evaluate betting strategy on validation period.
         
@@ -85,7 +97,12 @@ class BettingOptimizer:
             # Betting strategy parameters (being optimized)
             bet_threshold=bet_threshold,
             bet_size_base=bet_size_base,
-            bet_kelly_fraction=bet_kelly_fraction
+            bet_kelly_fraction=bet_kelly_fraction,
+            bet_min_confidence=bet_min_confidence,
+            bet_max_exposure=bet_max_exposure,
+            bet_size_max_multiplier=bet_size_max_multiplier,
+            use_overround_adjustment=use_overround_adjustment,
+            confidence_scaling=confidence_scaling
         )
         
         # Initialize environment with games and model
@@ -114,16 +131,41 @@ class BettingOptimizer:
         """Optuna objective function"""
         
         # Suggest betting strategy parameters
-        bet_threshold = trial.suggest_float('bet_threshold', 0.0, 0.15)
-        bet_size_base = trial.suggest_float('bet_size_base', 0.005, 0.05)
+        # Edge threshold: 0-12% (adjusted from 0-15% to be more realistic)
+        bet_threshold = trial.suggest_float('bet_threshold', 0.0, 0.12)
+        
+        # Base bet size: 0.5-6% of bankroll (adjusted from 0.5-5%)
+        bet_size_base = trial.suggest_float('bet_size_base', 0.005, 0.06)
+        
+        # Kelly fraction: 10-50% (unchanged, standard range)
         bet_kelly_fraction = trial.suggest_float('bet_kelly_fraction', 0.1, 0.5)
+        
+        # Minimum confidence: 30-60% (new parameter)
+        bet_min_confidence = trial.suggest_float('bet_min_confidence', 0.30, 0.60)
+        
+        # Max exposure per game: 8-25% of bankroll (new parameter)
+        bet_max_exposure = trial.suggest_float('bet_max_exposure', 0.08, 0.25)
+        
+        # Max bet size multiplier: 1.5-5.0x base size (new parameter)
+        bet_size_max_multiplier = trial.suggest_float('bet_size_max_multiplier', 1.5, 5.0)
+        
+        # Overround adjustment: categorical choice (new parameter)
+        use_overround_adjustment = trial.suggest_categorical('use_overround_adjustment', [True, False])
+        
+        # Confidence scaling: categorical choice (new parameter)
+        confidence_scaling = trial.suggest_categorical('confidence_scaling', [True, False])
         
         try:
             # Evaluate on validation set
             neg_profit = self.evaluate_betting_strategy(
                 bet_threshold=bet_threshold,
                 bet_size_base=bet_size_base,
-                bet_kelly_fraction=bet_kelly_fraction
+                bet_kelly_fraction=bet_kelly_fraction,
+                bet_min_confidence=bet_min_confidence,
+                bet_max_exposure=bet_max_exposure,
+                bet_size_max_multiplier=bet_size_max_multiplier,
+                use_overround_adjustment=use_overround_adjustment,
+                confidence_scaling=confidence_scaling
             )
             
             return neg_profit
@@ -183,6 +225,11 @@ class BettingOptimizer:
         print(f"  bet_threshold: {best_params['bet_threshold']:.4f}")
         print(f"  bet_size_base: {best_params['bet_size_base']:.4f}")
         print(f"  bet_kelly_fraction: {best_params['bet_kelly_fraction']:.4f}")
+        print(f"  bet_min_confidence: {best_params['bet_min_confidence']:.4f}")
+        print(f"  bet_max_exposure: {best_params['bet_max_exposure']:.4f}")
+        print(f"  bet_size_max_multiplier: {best_params['bet_size_max_multiplier']:.4f}")
+        print(f"  use_overround_adjustment: {best_params['use_overround_adjustment']}")
+        print(f"  confidence_scaling: {best_params['confidence_scaling']}")
         
         return study.best_params
 
@@ -220,7 +267,12 @@ def main():
 model = Model(
     bet_threshold={best_params['bet_threshold']},
     bet_size_base={best_params['bet_size_base']},
-    bet_kelly_fraction={best_params['bet_kelly_fraction']}
+    bet_kelly_fraction={best_params['bet_kelly_fraction']},
+    bet_min_confidence={best_params['bet_min_confidence']},
+    bet_max_exposure={best_params['bet_max_exposure']},
+    bet_size_max_multiplier={best_params['bet_size_max_multiplier']},
+    use_overround_adjustment={best_params['use_overround_adjustment']},
+    confidence_scaling={best_params['confidence_scaling']}
 )
 """)
 

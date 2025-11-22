@@ -783,7 +783,12 @@ class Model:
                  # Betting strategy parameters
                  bet_threshold=0.05,
                  bet_size_base=0.03,
-                 bet_kelly_fraction=0.25):
+                 bet_kelly_fraction=0.25,
+                 bet_min_confidence=0.40,
+                 bet_max_exposure=0.15,
+                 bet_size_max_multiplier=3.0,
+                 use_overround_adjustment=True,
+                 confidence_scaling=True):
         """
         Initialize the ensemble model with configurable hyperparameters.
         
@@ -810,6 +815,11 @@ class Model:
             bet_threshold: Minimum edge over implied odds to place bet (e.g., 0.05 = 5% edge required)
             bet_size_base: Base bet size as fraction of bankroll (e.g., 0.03 = 3% of bankroll)
             bet_kelly_fraction: Kelly criterion fraction for bet sizing (e.g., 0.25 = quarter Kelly)
+            bet_min_confidence: Minimum predicted probability to consider betting (e.g., 0.40 = 40%)
+            bet_max_exposure: Maximum total exposure per game as fraction of bankroll (e.g., 0.15 = 15%)
+            bet_size_max_multiplier: Maximum multiplier on base bet size (e.g., 3.0 = max 3x base)
+            use_overround_adjustment: Whether to normalize implied probabilities to remove bookmaker margin
+            confidence_scaling: Whether to scale bet size based on prediction confidence
         """
         # Initialize sub-models with parameters
         self.model_list = [
@@ -857,6 +867,11 @@ class Model:
         self.bet_threshold = bet_threshold
         self.bet_size_base = bet_size_base
         self.bet_kelly_fraction = bet_kelly_fraction
+        self.bet_min_confidence = bet_min_confidence
+        self.bet_max_exposure = bet_max_exposure
+        self.bet_size_max_multiplier = bet_size_max_multiplier
+        self.use_overround_adjustment = use_overround_adjustment
+        self.confidence_scaling = confidence_scaling
 
     def _get_input_features(self, home_id, away_id, season, date):
         """Get input features from all sub-models"""
@@ -956,40 +971,114 @@ class Model:
                     prob_away, prob_draw, prob_home = probs[0], probs[1], probs[2]
                     self.prediction_map[i] = probs
                     
-                    # Calculate betting odds thresholds
+                    # Get betting odds
                     odds_home = current['OddsH']
                     odds_away = current['OddsA']
                     odds_draw = current['OddsD']
                     
-                    # Kelly criterion for bet sizing for each outcome
-                    # bet_size = kelly_fraction * (edge / (odds - 1))
-                    # where edge = predicted_prob - implied_prob
+                    # Skip if any odds are invalid
+                    if any(odds <= 1.0 for odds in [odds_home, odds_away, odds_draw]):
+                        continue
                     
-                    # Calculate implied probabilities
-                    implied_home = 1 / odds_home if odds_home > 1.0 else 1.0
-                    implied_away = 1 / odds_away if odds_away > 1.0 else 1.0
-                    implied_draw = 1 / odds_draw if odds_draw > 1.0 else 1.0
+                    # Calculate raw implied probabilities
+                    implied_home_raw = 1 / odds_home
+                    implied_away_raw = 1 / odds_away
+                    implied_draw_raw = 1 / odds_draw
                     
-                    # Calculate edges
-                    edge_home = prob_home - implied_home
-                    edge_away = prob_away - implied_away
-                    edge_draw = prob_draw - implied_draw
+                    # Adjust for overround (bookmaker margin) if enabled
+                    if self.use_overround_adjustment:
+                        # Normalize implied probabilities to sum to 1.0
+                        total_implied = implied_home_raw + implied_away_raw + implied_draw_raw
+                        implied_home = implied_home_raw / total_implied
+                        implied_away = implied_away_raw / total_implied
+                        implied_draw = implied_draw_raw / total_implied
+                    else:
+                        implied_home = implied_home_raw
+                        implied_away = implied_away_raw
+                        implied_draw = implied_draw_raw
                     
-                    # Place bets if edge exceeds threshold
-                    if edge_home > self.bet_threshold and odds_home > 1.0:
-                        # Kelly criterion bet size with fractional Kelly
-                        kelly_size = self.bet_kelly_fraction * (edge_home / (odds_home - 1))
-                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
-                        bets.at[i, 'BetH'] = bet_amount
+                    # Calculate confidence using entropy (lower entropy = higher confidence)
+                    # Entropy: -sum(p * log(p)) for p in probabilities
+                    # Normalize to [0, 1] where 1 = max confidence (entropy=0), 0 = min confidence
+                    epsilon = 1e-10  # Avoid log(0)
+                    entropy = -(prob_home * np.log(prob_home + epsilon) + 
+                               prob_away * np.log(prob_away + epsilon) + 
+                               prob_draw * np.log(prob_draw + epsilon))
+                    max_entropy = np.log(3)  # Maximum entropy for 3 outcomes
+                    confidence = 1.0 - (entropy / max_entropy)  # 0 to 1, higher is more confident
                     
-                    if edge_away > self.bet_threshold and odds_away > 1.0:
-                        kelly_size = self.bet_kelly_fraction * (edge_away / (odds_away - 1))
-                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
-                        bets.at[i, 'BetA'] = bet_amount
+                    # Confidence scaling factor (1.0 if disabled, or scaled by confidence if enabled)
+                    confidence_multiplier = confidence if self.confidence_scaling else 1.0
                     
-                    if edge_draw > self.bet_threshold and odds_draw > 1.0:
-                        kelly_size = self.bet_kelly_fraction * (edge_draw / (odds_draw - 1))
-                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
-                        bets.at[i, 'BetD'] = bet_amount
+                    # Track total exposure for this game
+                    total_exposure = 0.0
+                    
+                    # Evaluate each outcome for betting
+                    bet_opportunities = []
+                    
+                    # Home win
+                    if prob_home >= self.bet_min_confidence:
+                        edge_home = prob_home - implied_home
+                        if edge_home > self.bet_threshold:
+                            # Kelly criterion: f = (p * (b - 1) - (1 - p)) / (b - 1)
+                            # where b = decimal odds, p = true probability
+                            kelly_fraction = (prob_home * (odds_home - 1) - (1 - prob_home)) / (odds_home - 1)
+                            kelly_fraction = max(0, kelly_fraction)  # No negative bets
+                            
+                            # Apply fractional Kelly and confidence scaling
+                            bet_fraction = self.bet_kelly_fraction * kelly_fraction * confidence_multiplier
+                            
+                            # Cap at max multiplier of base bet size
+                            bet_fraction = min(bet_fraction, self.bet_size_base * self.bet_size_max_multiplier)
+                            
+                            bet_opportunities.append(('BetH', bet_fraction, edge_home))
+                    
+                    # Away win
+                    if prob_away >= self.bet_min_confidence:
+                        edge_away = prob_away - implied_away
+                        if edge_away > self.bet_threshold:
+                            kelly_fraction = (prob_away * (odds_away - 1) - (1 - prob_away)) / (odds_away - 1)
+                            kelly_fraction = max(0, kelly_fraction)
+                            
+                            bet_fraction = self.bet_kelly_fraction * kelly_fraction * confidence_multiplier
+                            bet_fraction = min(bet_fraction, self.bet_size_base * self.bet_size_max_multiplier)
+                            
+                            bet_opportunities.append(('BetA', bet_fraction, edge_away))
+                    
+                    # Draw
+                    if prob_draw >= self.bet_min_confidence:
+                        edge_draw = prob_draw - implied_draw
+                        if edge_draw > self.bet_threshold:
+                            kelly_fraction = (prob_draw * (odds_draw - 1) - (1 - prob_draw)) / (odds_draw - 1)
+                            kelly_fraction = max(0, kelly_fraction)
+                            
+                            bet_fraction = self.bet_kelly_fraction * kelly_fraction * confidence_multiplier
+                            bet_fraction = min(bet_fraction, self.bet_size_base * self.bet_size_max_multiplier)
+                            
+                            bet_opportunities.append(('BetD', bet_fraction, edge_draw))
+                    
+                    # Sort by edge (highest edge first) and place bets respecting exposure limit
+                    bet_opportunities.sort(key=lambda x: x[2], reverse=True)
+                    
+                    for bet_type, bet_fraction, edge in bet_opportunities:
+                        # Check if we've exceeded max exposure for this game
+                        if total_exposure >= self.bet_max_exposure:
+                            break
+                        
+                        # Calculate bet amount
+                        bet_amount = bankroll * bet_fraction
+                        
+                        # Respect min/max bet constraints
+                        bet_amount = max(min_bet, min(max_bet, bet_amount))
+                        
+                        # Adjust if this would exceed max exposure
+                        remaining_exposure = self.bet_max_exposure - total_exposure
+                        if bet_amount / bankroll > remaining_exposure:
+                            bet_amount = bankroll * remaining_exposure
+                            bet_amount = max(min_bet, bet_amount)  # Still respect min bet
+                        
+                        # Place the bet
+                        bets.at[i, bet_type] = bet_amount
+                        total_exposure += bet_amount / bankroll
         
         return bets
