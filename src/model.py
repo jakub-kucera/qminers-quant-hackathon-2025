@@ -758,28 +758,28 @@ class Model:
     """Main ensemble model for ice hockey betting"""
     
     def __init__(self, 
-                 # Ensemble parameters (optimized defaults)
+                 # Ensemble parameters (optimized defaults from 3-way multinomial optimization)
                  ensamble_required_n=700,
-                 ensamble_retrain_freq=600,
+                 ensamble_retrain_freq=300,
                  # Sub-model parameters (optimized defaults)
-                 pythagorean_power=1.499553707049086,
+                 pythagorean_power=0.9815160790897732,
                  pythagorean_regularization=10,
                  pythagorean_decay=0.992,
                  four_factor_required_n=400,
-                 four_factor_decay=0.9903001400465671,
+                 four_factor_decay=0.9901321052235277,
                  gradient_descent_epochs=12,
                  gradient_descent_min_games=800,
-                 exhaustion_b2b_penalty=1.8708290679206017,
-                 exhaustion_road_penalty=0.6669690630456186,
-                 elo_k_base=10,
-                 elo_home_advantage=50,
+                 exhaustion_b2b_penalty=1.7896362263470917,
+                 exhaustion_road_penalty=0.6151810640568766,
+                 elo_k_base=20,
+                 elo_home_advantage=45,
                  elo_margin_cap=5,
-                 poisson_regularization=2.6883250153197973,
+                 poisson_regularization=3.319620279992762,
                  poisson_decay=0.992,
-                 # Rolling window parameters (NEW)
+                 # Rolling window parameters (optimized defaults)
                  rolling_window_short=5,
                  rolling_window_med=10,
-                 rolling_window_long=20,
+                 rolling_window_long=25,
                  # Betting strategy parameters
                  bet_threshold=0.05,
                  bet_size_base=0.03,

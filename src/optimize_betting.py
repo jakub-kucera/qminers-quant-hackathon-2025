@@ -61,27 +61,27 @@ class BettingOptimizer:
         """
         # Create model with fixed prediction hyperparameters and variable betting parameters
         model = Model(
-            # Use optimized prediction hyperparameters (from previous optimization)
+            # Use optimized prediction hyperparameters (from 3-way multinomial optimization)
             ensamble_required_n=700,
-            ensamble_retrain_freq=600,
-            pythagorean_power=1.499553707049086,
+            ensamble_retrain_freq=300,
+            pythagorean_power=0.9815160790897732,
             pythagorean_regularization=10,
             pythagorean_decay=0.992,
             four_factor_required_n=400,
-            four_factor_decay=0.9903001400465671,
+            four_factor_decay=0.9901321052235277,
             gradient_descent_epochs=12,
             gradient_descent_min_games=800,
-            exhaustion_b2b_penalty=1.8708290679206017,
-            exhaustion_road_penalty=0.6669690630456186,
-            elo_k_base=10,
-            elo_home_advantage=50,
+            exhaustion_b2b_penalty=1.7896362263470917,
+            exhaustion_road_penalty=0.6151810640568766,
+            elo_k_base=20,
+            elo_home_advantage=45,
             elo_margin_cap=5,
-            poisson_regularization=2.6883250153197973,
+            poisson_regularization=3.319620279992762,
             poisson_decay=0.992,
-            # Rolling window parameters (use defaults)
+            # Rolling window parameters (optimized defaults)
             rolling_window_short=5,
             rolling_window_med=10,
-            rolling_window_long=20,
+            rolling_window_long=25,
             # Betting strategy parameters (being optimized)
             bet_threshold=bet_threshold,
             bet_size_base=bet_size_base,
