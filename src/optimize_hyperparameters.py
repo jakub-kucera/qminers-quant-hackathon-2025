@@ -162,16 +162,24 @@ class ModelOptimizer:
                                 np_array = np.array(model.past_pred)
                                 sample_weights = np.exp(-0.0003 * np.arange(len(model.past_pred)))
                                 from sklearn.linear_model import LogisticRegression
-                                model.ensamble = LogisticRegression(max_iter=10000)
+                                model.ensamble = LogisticRegression(
+                                    max_iter=10000,
+                                    multi_class='multinomial',
+                                    solver='lbfgs'
+                                )
                                 model.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
                             
-                            # Get prediction from ensemble
-                            pred = model.ensamble.predict_proba(np.array([input_arr]))[0, 1]
+                            # Get 3-class prediction from ensemble: [P(Away), P(Draw), P(Home)]
+                            probs = model.ensamble.predict_proba(np.array([input_arr]))[0]
                             
                             # Store prediction for evaluation
                             game = self.games.loc[idx]
                             predictions.append({
-                                'pred_home': pred,
+                                'prob_away': probs[0],
+                                'prob_draw': probs[1],
+                                'prob_home': probs[2],
+                                'actual_away': game['A'],
+                                'actual_draw': game['D'],
                                 'actual_home': game['H']
                             })
         
@@ -194,19 +202,39 @@ class ModelOptimizer:
         brier_score = 0.0
         
         for pred in predictions:
-            p = pred['pred_home']
-            actual = pred['actual_home']
+            p_away = pred['prob_away']
+            p_draw = pred['prob_draw']
+            p_home = pred['prob_home']
+            actual_away = pred['actual_away']
+            actual_draw = pred['actual_draw']
+            actual_home = pred['actual_home']
             
-            # Accuracy
-            if (p > 0.5 and actual == 1) or (p < 0.5 and actual == 0):
+            # Accuracy - predicted class matches actual
+            pred_class = np.argmax([p_away, p_draw, p_home])  # 0=Away, 1=Draw, 2=Home
+            if pred_class == 0 and actual_away:
+                correct += 1
+            elif pred_class == 1 and actual_draw:
+                correct += 1
+            elif pred_class == 2 and actual_home:
                 correct += 1
             
-            # Log loss
-            p_clamped = max(0.001, min(0.999, p))
-            log_loss += -(actual * np.log(p_clamped) + (1 - actual) * np.log(1 - p_clamped))
+            # Log loss (multinomial cross-entropy)
+            p_away_clamped = max(0.001, min(0.999, p_away))
+            p_draw_clamped = max(0.001, min(0.999, p_draw))
+            p_home_clamped = max(0.001, min(0.999, p_home))
             
-            # Brier score
-            brier_score += (p - actual) ** 2
+            log_loss += -(
+                actual_away * np.log(p_away_clamped) +
+                actual_draw * np.log(p_draw_clamped) +
+                actual_home * np.log(p_home_clamped)
+            )
+            
+            # Brier score (mean squared error across all classes)
+            brier_score += (
+                (p_away - actual_away) ** 2 +
+                (p_draw - actual_draw) ** 2 +
+                (p_home - actual_home) ** 2
+            ) / 3  # Average over 3 classes
         
         return {
             'n_predictions': n,

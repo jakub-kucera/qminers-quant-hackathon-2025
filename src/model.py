@@ -883,12 +883,19 @@ class Model:
         date = current['Date']
         home_id = current['HID']
         away_id = current['AID']
-        home_win = current['H']
+        
+        # Encode outcome as 3-class: 0=Away, 1=Draw, 2=Home
+        if current['H']:
+            outcome = 2  # Home win
+        elif current['A']:
+            outcome = 0  # Away win
+        else:  # current['D']
+            outcome = 1  # Draw
         
         # Add training data
         input_arr = self._get_input_features(home_id, away_id, season, date)
         if input_arr is not None:
-            self.past_pred.append([*input_arr, home_win])
+            self.past_pred.append([*input_arr, outcome])
             self.ensamble_retrain -= 1
         
         # Update sub-models
@@ -936,30 +943,39 @@ class Model:
                         self.ensamble_retrain = self.ensamble_retrain_freq
                         np_array = np.array(self.past_pred)
                         sample_weights = np.exp(-0.0003 * np.arange(len(self.past_pred)))
-                        self.ensamble = LogisticRegression(max_iter=10000)
+                        # Multinomial logistic regression for 3-class prediction
+                        self.ensamble = LogisticRegression(
+                            max_iter=10000,
+                            multi_class='multinomial',
+                            solver='lbfgs'
+                        )
                         self.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
                     
-                    # Get prediction
-                    pred = self.ensamble.predict_proba(np.array([input_arr]))[0, 1]
-                    self.prediction_map[i] = pred
+                    # Get 3-way predictions: [P(Away), P(Draw), P(Home)]
+                    probs = self.ensamble.predict_proba(np.array([input_arr]))[0]
+                    prob_away, prob_draw, prob_home = probs[0], probs[1], probs[2]
+                    self.prediction_map[i] = probs
                     
                     # Calculate betting odds thresholds
                     odds_home = current['OddsH']
                     odds_away = current['OddsA']
                     odds_draw = current['OddsD']
                     
-                    # Kelly criterion for bet sizing
+                    # Kelly criterion for bet sizing for each outcome
                     # bet_size = kelly_fraction * (edge / (odds - 1))
-                    # where edge = predicted_prob * odds - 1
+                    # where edge = predicted_prob - implied_prob
                     
-                    # Bet on home if predicted probability is higher than implied odds
+                    # Calculate implied probabilities
                     implied_home = 1 / odds_home if odds_home > 1.0 else 1.0
                     implied_away = 1 / odds_away if odds_away > 1.0 else 1.0
+                    implied_draw = 1 / odds_draw if odds_draw > 1.0 else 1.0
                     
-                    edge_home = pred - implied_home
-                    edge_away = (1 - pred) - implied_away
+                    # Calculate edges
+                    edge_home = prob_home - implied_home
+                    edge_away = prob_away - implied_away
+                    edge_draw = prob_draw - implied_draw
                     
-                    # Place bet if edge exceeds threshold
+                    # Place bets if edge exceeds threshold
                     if edge_home > self.bet_threshold and odds_home > 1.0:
                         # Kelly criterion bet size with fractional Kelly
                         kelly_size = self.bet_kelly_fraction * (edge_home / (odds_home - 1))
@@ -970,5 +986,10 @@ class Model:
                         kelly_size = self.bet_kelly_fraction * (edge_away / (odds_away - 1))
                         bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
                         bets.at[i, 'BetA'] = bet_amount
+                    
+                    if edge_draw > self.bet_threshold and odds_draw > 1.0:
+                        kelly_size = self.bet_kelly_fraction * (edge_draw / (odds_draw - 1))
+                        bet_amount = max(min_bet, min(max_bet, bankroll * min(kelly_size, self.bet_size_base * 5)))
+                        bets.at[i, 'BetD'] = bet_amount
         
         return bets
