@@ -50,7 +50,7 @@ class BettingOptimizer:
     def _load_and_split_data(self):
         """Load data and create train/validation split"""
         # Load games data
-        self.games = pd.read_csv("./data/games.csv", index_col=0, parse_dates=["Date", "Open"])
+        self.games = pd.read_csv("../data/games.csv", index_col=0, parse_dates=["Date", "Open"])
         
         # Get all game dates
         all_dates = sorted(self.games['Date'].unique())
@@ -124,8 +124,8 @@ class BettingOptimizer:
         initial_bankroll = 1000.0
         profit = final_bankroll - initial_bankroll
         
-        # Return negative profit (since optuna minimizes)
-        return -profit
+        # Return profit (optuna will maximize this)
+        return profit
     
     def objective(self, trial):
         """Optuna objective function"""
@@ -157,7 +157,7 @@ class BettingOptimizer:
         
         try:
             # Evaluate on validation set
-            neg_profit = self.evaluate_betting_strategy(
+            profit = self.evaluate_betting_strategy(
                 bet_threshold=bet_threshold,
                 bet_size_base=bet_size_base,
                 bet_kelly_fraction=bet_kelly_fraction,
@@ -168,11 +168,11 @@ class BettingOptimizer:
                 confidence_scaling=confidence_scaling
             )
             
-            return neg_profit
+            return profit
             
         except Exception as e:
             print(f"Trial failed: {e}")
-            return float('inf')
+            return float('-inf')  # Return worst possible value for maximization
     
     def optimize(self, n_trials=50, n_jobs=1, storage=None, study_name='betting_strategy_optimization'):
         """
@@ -197,7 +197,7 @@ class BettingOptimizer:
         
         # Create study
         study = optuna.create_study(
-            direction='minimize',
+            direction='maximize',  # Maximize profit
             study_name=study_name,
             storage=storage,
             load_if_exists=True
@@ -216,7 +216,7 @@ class BettingOptimizer:
         print("="*60)
         
         print(f"\nBest trial:")
-        print(f"  Profit: ${-study.best_value:.2f}")
+        print(f"  Profit: ${study.best_value:.2f}")
         print(f"  Params: {study.best_params}")
         
         # Calculate metrics for best trial
