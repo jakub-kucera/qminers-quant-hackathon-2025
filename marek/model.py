@@ -1,13 +1,18 @@
 import numpy as np
 import pandas as pd
-from xgboost import XGBClassifier
+import torch
+import torch.nn as nn
+from matplotlib import pyplot as plt
 
 PRED_MIN_MATCHES = 500
 SEASON_MIN_MATCHES = 100
 TEAM_EMBED_LEN = 15
 FEATURE_LEN = TEAM_EMBED_LEN + 8
 LAST_MATCH_NUM = 5
+
 MODEL_FILENAME = "model.json"
+SCALER_MEAN_FILENAME = "scaler_mean.npy"
+SCALER_VAR_FILENAME = "scaler_var.npy"
 
 ELO_HOME_ADVANTAGE = 30
 ELO_K = 25
@@ -15,6 +20,27 @@ INIT_ELO_RATING = 1000
 
 # upper bound on the number of teams
 TEAM_NUM = 50
+UB = 10000
+LAST_PRED_WINDOW = 20
+
+
+class MatchPredictor(nn.Module):
+    def __init__(self, input_dim=FEATURE_LEN, hidden1=64, hidden2=32, output_dim=3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden1),
+            nn.BatchNorm1d(hidden1),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden1, hidden2),
+            nn.BatchNorm1d(hidden2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden2, output_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 
 def odds_to_probs(input_df: pd.DataFrame) -> pd.DataFrame:
@@ -205,8 +231,16 @@ class Model:
     def __init__(self) -> None:
         self.past_matches = None
         self.elo = np.ones(TEAM_NUM) * INIT_ELO_RATING
-        self.model = XGBClassifier()
-        self.model.load_model(MODEL_FILENAME)
+        self.model = MatchPredictor()
+        self.model.load_state_dict(torch.load(MODEL_FILENAME))
+        self.model.eval()
+        self.scaler_mean = np.load(SCALER_MEAN_FILENAME)
+        self.scaler_std = np.load(SCALER_VAR_FILENAME)
+        self.preds = -np.ones(UB)
+        self.results = np.ones(UB) * 10
+        self.correct_preds = 0
+        self.wrong_preds = 0
+        self.last_preds = []
 
     def place_bets(
         self,
@@ -222,6 +256,7 @@ class Model:
         # update the ELO rating
         for inc_idx in range(len(inc)):
             row = inc.iloc[inc_idx]
+            idx = int(inc.index.tolist()[inc_idx])
             if row["H"]:
                 res_int = 0
             elif row["A"]:
@@ -229,13 +264,21 @@ class Model:
             else:
                 res_int = 2
 
+            if self.preds[idx] >= 0:
+                if self.preds[idx] == res_int:
+                    # print(f"Predicted correctly")
+                    self.correct_preds += 1
+                    self.last_preds.append(1)
+                else:
+                    # print("Predicted wrong!")
+                    self.wrong_preds += 1
+                    self.last_preds.append(0)
+                # print(
+                #    f"Accuracy: {self.correct_preds/(self.correct_preds+self.wrong_preds)}, last predictions: {np.sum(self.last_preds[-LAST_PRED_WINDOW:])/LAST_PRED_WINDOW}"
+                # )
+
             self.elo = update_elo(
-                self.elo,
-                row["HID"],
-                row["AID"],
-                row["HS"],
-                row["AS"],
-                res_int
+                self.elo, row["HID"], row["AID"], row["HS"], row["AS"], res_int
             )
 
         # save the incremental data
@@ -304,12 +347,26 @@ class Model:
                 )
             )
 
-            # make the prediction
-            res = self.model.predict(diff)[0]
+            # scale the feature vector
+            diff = (diff - self.scaler_mean) / self.scaler_std
 
-            bets[op_idx, res] = min_bet
+            # make the prediction
+            res = self.model(torch.from_numpy(diff).float())
+            pred_res = torch.argmax(torch.softmax(res, dim=1), dim=1).item()
+            row_id = opps.index.tolist()[op_idx]
+            self.preds[row_id] = pred_res
+
+            bets[op_idx, pred_res] = min_bet
 
         bets = pd.DataFrame(
             data=bets, columns=["BetH", "BetA", "BetD"], index=opps.index
         )
         return bets
+
+    def final_stats(self):
+        print(
+            f"Total accuracy {self.correct_preds/(self.correct_preds+self.wrong_preds)}"
+        )
+        rolling_acc = np.convolve(self.last_preds, np.ones(LAST_PRED_WINDOW), mode="valid")
+        plt.plot(np.arange(len(rolling_acc)), rolling_acc)
+        plt.show()
