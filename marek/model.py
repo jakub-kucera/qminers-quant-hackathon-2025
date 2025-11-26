@@ -3,11 +3,12 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
+import scipy
 
 PRED_MIN_MATCHES = 500
 SEASON_MIN_MATCHES = 100
 TEAM_EMBED_LEN = 15
-FEATURE_LEN = TEAM_EMBED_LEN + 8
+FEATURE_LEN = TEAM_EMBED_LEN + 12
 LAST_MATCH_NUM = 5
 
 MODEL_FILENAME = "model.json"
@@ -40,7 +41,9 @@ class MatchPredictor(nn.Module):
         )
 
     def forward(self, x):
-        return self.net(x)
+        # convert the bookmaker probs
+        market_logits = x[:, -3:]
+        return self.net(x) + market_logits
 
 
 def odds_to_probs(input_df: pd.DataFrame) -> pd.DataFrame:
@@ -140,6 +143,81 @@ def update_elo(
     return new_elo
 
 
+def calculate_kelly_stakes(model_probs, market_odds, bankroll, fractional_kelly=0.3):
+    """
+    Calculates optimal bets for Mutually Exclusive outcomes (1x2).
+
+    Args:
+        model_probs (list): [Prob_Home, Prob_Draw, Prob_Away] from your NN.
+        market_odds (list): [Odds_Home, Odds_Draw, Odds_Away] from Bookie (Decimal).
+        bankroll (float): Total money available.
+        fractional_kelly (float): Safety factor (e.g., 0.3 for 30% Kelly).
+                                  Professional bettors rarely use full Kelly (1.0).
+
+    Returns:
+        dict: Recommended bets in cash and percentage.
+    """
+    p = np.array(model_probs)
+    b = np.array(market_odds)
+
+    # 1. Check for value (Expected Value > 1.0)
+    # EV = Probability * Odds. If EV <= 1, Kelly bet is always 0.
+    expected_values = p * b
+
+    # If no value exists anywhere, don't waste time optimizing
+    if np.max(expected_values) <= 1.0:
+        return {
+            "bet_fractions": np.zeros(3),
+            "bet_amounts": np.zeros(3),
+            "expected_growth": 0.0,
+        }
+
+    # 2. Define the Negative Expected Log Growth (to minimize)
+    def neg_log_growth(f):
+        # f is an array of bet fractions [f_H, f_D, f_A]
+        # Wealth if outcome i hits: 1 - sum(bets) + (bet_on_i * odds_i)
+        # Note: We enforce sum(f) < 1 via constraints later, but add epsilon for safety
+        current_wealths = 1.0 - np.sum(f) + (f * b)
+
+        # Log growth = Sum( p_i * ln(wealth_i) )
+        # We assume utility of ruin is -infinity, so clamp wealth > 0
+        safe_wealths = np.maximum(current_wealths, 1e-10)
+        return -np.sum(p * np.log(safe_wealths))
+
+    # 3. Constraints & Bounds
+    # Constraint: Sum of bets < 1.0 (cannot bet more than bankroll)
+    constraints = {"type": "ineq", "fun": lambda f: 1.0 - np.sum(f)}
+    # Bounds: Each bet must be 0 <= f <= 1
+    bounds = [(0, 1) for _ in range(3)]
+
+    # 4. Optimize
+    # Start guess: bet 0 on everything
+    initial_guess = np.zeros(3)
+
+    result = scipy.optimize.minimize(
+        neg_log_growth,
+        initial_guess,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
+    )
+
+    optimal_f = result.x
+
+    # 5. Apply Fractional Kelly (Risk Management)
+    # We scale the optimal fractions down.
+    final_f = optimal_f * fractional_kelly
+
+    # Zero out tiny bets (numerical noise)
+    final_f[final_f < 0.0001] = 0.0
+
+    return {
+        "bet_fractions": final_f,  # Vector [f_H, f_D, f_A]
+        "bet_amounts": final_f * bankroll,
+        "raw_model_ev": expected_values,
+    }
+
+
 def get_team_stats(
     season: int,
     team_id: int,
@@ -236,11 +314,7 @@ class Model:
         self.model.eval()
         self.scaler_mean = np.load(SCALER_MEAN_FILENAME)
         self.scaler_std = np.load(SCALER_VAR_FILENAME)
-        self.preds = -np.ones(UB)
-        self.results = np.ones(UB) * 10
-        self.correct_preds = 0
-        self.wrong_preds = 0
-        self.last_preds = []
+        self.eps = 1e-9
 
     def place_bets(
         self,
@@ -256,26 +330,12 @@ class Model:
         # update the ELO rating
         for inc_idx in range(len(inc)):
             row = inc.iloc[inc_idx]
-            idx = int(inc.index.tolist()[inc_idx])
             if row["H"]:
                 res_int = 0
             elif row["A"]:
                 res_int = 1
             else:
                 res_int = 2
-
-            if self.preds[idx] >= 0:
-                if self.preds[idx] == res_int:
-                    # print(f"Predicted correctly")
-                    self.correct_preds += 1
-                    self.last_preds.append(1)
-                else:
-                    # print("Predicted wrong!")
-                    self.wrong_preds += 1
-                    self.last_preds.append(0)
-                # print(
-                #    f"Accuracy: {self.correct_preds/(self.correct_preds+self.wrong_preds)}, last predictions: {np.sum(self.last_preds[-LAST_PRED_WINDOW:])/LAST_PRED_WINDOW}"
-                # )
 
             self.elo = update_elo(
                 self.elo, row["HID"], row["AID"], row["HS"], row["AS"], res_int
@@ -296,6 +356,8 @@ class Model:
 
         bets = np.zeros((len(opps), 3))
         min_bet = summary.iloc[0]["Min_bet"]
+        max_bet = summary.iloc[0]["Max_bet"]
+        cur_bankroll = summary.iloc[0]["Bankroll"]
 
         # make the bets
         for op_idx in range(len(opps)):
@@ -332,41 +394,51 @@ class Model:
 
             diff = home_stats - away_stats
 
-            # add the odds
-            diff = np.append(diff, [row["ProbH"], row["ProbA"], row["ProbD"]])
+            book_probs = np.array([row["ProbH"], row["ProbA"], row["ProbD"]])
 
-            # append data from the bet opportunity
+            # add the bookmaker odds
+            diff = np.append(diff, book_probs)
+
+            # add market entropy
+            diff = np.append(diff, -np.sum(book_probs * np.log(book_probs + self.eps)))
+
+            # add elo rating for both teams
             elo_h = self.elo[row["HID"]]
             elo_a = self.elo[row["AID"]]
             elo_h_expected, elo_a_expected = elo_get_expected(
                 self.elo, row["HID"], row["AID"]
             )
-            diff = np.atleast_2d(
-                np.append(
-                    diff, [elo_h, elo_a, elo_h - elo_a, elo_h_expected, elo_a_expected]
-                )
+            diff = np.append(
+                diff, [elo_h, elo_a, elo_h - elo_a, elo_h_expected, elo_a_expected]
             )
+
+            # add the logits at the end
+            f_logits = np.log(book_probs + self.eps) - np.log(1 - book_probs + self.eps)
+            diff = np.append(diff, f_logits)
 
             # scale the feature vector
             diff = (diff - self.scaler_mean) / self.scaler_std
+            diff = np.atleast_2d(diff)
 
             # make the prediction
-            res = self.model(torch.from_numpy(diff).float())
-            pred_res = torch.argmax(torch.softmax(res, dim=1), dim=1).item()
-            row_id = opps.index.tolist()[op_idx]
-            self.preds[row_id] = pred_res
+            res = torch.softmax(self.model(torch.from_numpy(diff).float()), dim=1)
+            raw_odds = [row["OddsH"], row["OddsA"], row["OddsD"]]
+            decision = calculate_kelly_stakes(
+                res.detach().numpy(), raw_odds, cur_bankroll
+            )
 
-            bets[op_idx, pred_res] = min_bet
+            # check that the amounts are within range
+            dec = np.array(decision["bet_amounts"])
+            for i in range(len(dec)):
+                if dec[i] > 0:
+                    dec[i] = np.clip(dec[i], min_bet, max_bet)
+
+            bets[op_idx, :] = dec
+
+            # update the bankroll for future bets
+            cur_bankroll -= np.sum(dec)
 
         bets = pd.DataFrame(
             data=bets, columns=["BetH", "BetA", "BetD"], index=opps.index
         )
         return bets
-
-    def final_stats(self):
-        print(
-            f"Total accuracy {self.correct_preds/(self.correct_preds+self.wrong_preds)}"
-        )
-        rolling_acc = np.convolve(self.last_preds, np.ones(LAST_PRED_WINDOW), mode="valid")
-        plt.plot(np.arange(len(rolling_acc)), rolling_acc)
-        plt.show()
