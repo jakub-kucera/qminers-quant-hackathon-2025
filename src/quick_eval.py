@@ -10,9 +10,9 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '.')
-from src.model import Model
-from src.environment import Environment
+# sys.path.insert(0, '.')
+from model import Model
+from environment import Environment
 
 
 def evaluate_predictions(games, model, start_date, end_date):
@@ -237,7 +237,7 @@ def print_metrics(metrics, title="METRICS"):
 def main():
     """Quick evaluation on recent data"""
     print("Loading data...")
-    games = pd.read_csv('./data/games.csv', index_col=0, parse_dates=["Date", "Open"])
+    games = pd.read_csv('../data/games.csv', index_col=0, parse_dates=["Date", "Open"])
     print(f"Loaded {len(games)} games")
     
     # Evaluate on last 2 years

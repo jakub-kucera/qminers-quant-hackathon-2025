@@ -15,14 +15,14 @@ warnings.filterwarnings('ignore')
 # Import your model
 import sys
 sys.path.insert(0, '.')
-from src.model import Model
-from src.environment import Environment
+from model import Model
+from environment import Environment
 
 
 class ModelOptimizer:
     """Optimize model hyperparameters using Optuna"""
     
-    def __init__(self, games_path='./data/games.csv', validation_period=365):
+    def __init__(self, games_path='../data/games.csv', validation_period=365):
         """
         Initialize optimizer
         
@@ -30,18 +30,21 @@ class ModelOptimizer:
             games_path: Path to games CSV
             validation_period: Days to use for validation (rest is training)
         """
-        print("Loading data...")
-        self.games = pd.read_csv(games_path, index_col=0, parse_dates=["Date", "Open"])
-        print(f"Loaded {len(self.games)} games")
+        self.games_path = games_path
+        self.validation_period = validation_period
+        
+    def _load_and_split_data(self):
+        """Load data and create train/validation split - called in each trial for parallel safety"""
+        # Load games data (each worker loads its own copy)
+        games = pd.read_csv(self.games_path, index_col=0, parse_dates=["Date", "Open"])
         
         # Define train/val split
-        max_date = self.games['Date'].max()
-        self.val_start = max_date - pd.Timedelta(days=validation_period)
-        self.train_end = self.val_start
-        self.train_start = self.games['Date'].min()
+        max_date = games['Date'].max()
+        val_start = max_date - pd.Timedelta(days=self.validation_period)
+        train_end = val_start
+        train_start = games['Date'].min()
         
-        print(f"\nTrain: {self.train_start.date()} to {self.train_end.date()}")
-        print(f"Val:   {self.val_start.date()} to {max_date.date()}")
+        return games, train_start, train_end, val_start
         
     def objective(self, trial):
         """
@@ -53,6 +56,8 @@ class ModelOptimizer:
         Returns:
             Metric to optimize (we'll use negative log-loss, so higher is better)
         """
+        # Load data for this trial (each worker loads its own copy - no contention!)
+        games, train_start, train_end, val_start = self._load_and_split_data()
         # Suggest hyperparameters - focusing on most impactful ones
         params = {
             # Ensemble parameters
@@ -93,8 +98,8 @@ class ModelOptimizer:
             # Create model with these parameters
             model = self._create_model_with_params(params)
             
-            # Evaluate model
-            metrics = self._evaluate_model(model)
+            # Evaluate model (pass data to avoid shared state)
+            metrics = self._evaluate_model(model, games, train_start, val_start)
             
             # Log metrics
             trial.set_user_attr('accuracy', metrics['accuracy'])
@@ -112,14 +117,21 @@ class ModelOptimizer:
         """Create a model instance with given parameters"""
         return Model(**params)
     
-    def _evaluate_model(self, model):
-        """Evaluate model on validation set - focuses on prediction accuracy only"""
+    def _evaluate_model(self, model, games, train_start, val_start):
+        """Evaluate model on validation set - focuses on prediction accuracy only
+        
+        Args:
+            model: Model instance to evaluate
+            games: DataFrame with game data
+            train_start: Start date for training
+            val_start: Start date for validation
+        """
         # Create environment
         env = Environment(
-            self.games.copy(),
+            games.copy(),
             model,
-            start_date=self.train_start,
-            end_date=self.games['Date'].max(),
+            start_date=train_start,
+            end_date=games['Date'].max(),
             init_bankroll=1000,
             min_bet=5,
             max_bet=100
@@ -128,7 +140,7 @@ class ModelOptimizer:
         # Run simulation and collect predictions
         predictions = []
         
-        for date in pd.date_range(self.train_start, self.games['Date'].max()):
+        for date in pd.date_range(train_start, games['Date'].max()):
             inc = env._next_date(date)
             opps = env._get_options(date)
             
@@ -143,7 +155,7 @@ class ModelOptimizer:
                 model._game_increment(idx, current)
             
             # Make predictions for ALL games in validation period (not just bets)
-            if date >= self.val_start:
+            if date >= val_start:
                 for idx in opps.index:
                     current = opps.loc[idx]
                     season = current['Season']
@@ -164,7 +176,6 @@ class ModelOptimizer:
                                 from sklearn.linear_model import LogisticRegression
                                 model.ensamble = LogisticRegression(
                                     max_iter=10000,
-                                    multi_class='multinomial',
                                     solver='lbfgs'
                                 )
                                 model.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
@@ -173,7 +184,7 @@ class ModelOptimizer:
                             probs = model.ensamble.predict_proba(np.array([input_arr]))[0]
                             
                             # Store prediction for evaluation
-                            game = self.games.loc[idx]
+                            game = games.loc[idx]
                             predictions.append({
                                 'prob_away': probs[0],
                                 'prob_draw': probs[1],
@@ -264,12 +275,28 @@ class ModelOptimizer:
         print(f"Study: {study_name}")
         print(f"Parallel jobs: {n_jobs if n_jobs > 0 else 'all CPUs'}")
         
+        # Load data once to print info (each worker will load its own copy)
+        games, train_start, train_end, val_start = self._load_and_split_data()
+        print(f"\nLoaded {len(games)} games")
+        print(f"Train: {train_start.date()} to {train_end.date()}")
+        print(f"Val:   {val_start.date()} to {games['Date'].max().date()}")
+        
         # Setup storage for parallel execution
         if n_jobs != 1 and storage is None:
             storage = f'sqlite:///{study_name}.db'
             print(f"Storage: {storage}")
+            print(f"Note: Each worker loads its own data copy for parallel safety")
         
-        # Create study
+        # Create study with optimized SQLite settings for parallel execution
+        if storage and storage.startswith('sqlite'):
+            # Use WAL mode for better concurrent writes
+            import sqlite3
+            db_path = storage.replace('sqlite:///', '')
+            conn = sqlite3.connect(db_path)
+            conn.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging for concurrency
+            conn.execute('PRAGMA synchronous=NORMAL')  # Faster writes
+            conn.close()
+        
         study = optuna.create_study(
             study_name=study_name,
             direction='maximize',  # Maximize negative log-loss

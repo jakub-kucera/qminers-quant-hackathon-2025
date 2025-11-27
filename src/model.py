@@ -780,14 +780,16 @@ class Model:
                  rolling_window_short=5,
                  rolling_window_med=10,
                  rolling_window_long=25,
-                 # Betting strategy parameters
-                 bet_threshold=0.05,
-                 bet_size_base=0.03,
-                 bet_kelly_fraction=0.25,
-                 bet_min_confidence=0.40,
-                 bet_max_exposure=0.15,
-                 bet_size_max_multiplier=3.0,
-                 use_overround_adjustment=True,
+                 # Betting strategy parameters (optimized via optimize_betting.py)
+                 # Note: These values were optimized but still resulted in -$112.71 profit
+                 # Consider further tuning or using different validation period
+                 bet_threshold=0.0419644189979128,
+                 bet_size_base=0.009610412717873114,
+                 bet_kelly_fraction=0.10021644282504837,
+                 bet_min_confidence=0.4485261426475807,
+                 bet_max_exposure=0.11155183772100152,
+                 bet_size_max_multiplier=3.042918661869248,
+                 use_overround_adjustment=False,
                  confidence_scaling=True):
         """
         Initialize the ensemble model with configurable hyperparameters.
@@ -961,7 +963,6 @@ class Model:
                         # Multinomial logistic regression for 3-class prediction
                         self.ensamble = LogisticRegression(
                             max_iter=10000,
-                            multi_class='multinomial',
                             solver='lbfgs'
                         )
                         self.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])

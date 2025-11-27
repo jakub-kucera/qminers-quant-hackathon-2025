@@ -37,36 +37,39 @@ from src.environment import Environment
 class BettingOptimizer:
     """Optimize betting strategy parameters to maximize bankroll"""
     
-    def __init__(self, validation_period_days=365):
+    def __init__(self, validation_period_days=365, data_path="../data/games.csv"):
         """
         Args:
             validation_period_days: Number of days to use for validation
+            data_path: Path to the games CSV file
         """
         self.validation_period_days = validation_period_days
-        self.games = None
-        self.train_end_date = None
-        self.val_end_date = None
+        self.data_path = data_path
         
     def _load_and_split_data(self):
-        """Load data and create train/validation split"""
-        # Load games data
-        self.games = pd.read_csv("../data/games.csv", index_col=0, parse_dates=["Date", "Open"])
+        """Load data and create train/validation split - called in each trial for parallel safety"""
+        # Load games data (each worker loads its own copy)
+        games = pd.read_csv(self.data_path, index_col=0, parse_dates=["Date", "Open"])
         
         # Get all game dates
-        all_dates = sorted(self.games['Date'].unique())
+        all_dates = sorted(games['Date'].unique())
         
         # Use last validation_period_days for validation
-        self.val_end_date = all_dates[-1]
-        self.train_end_date = self.val_end_date - timedelta(days=self.validation_period_days)
+        val_end_date = all_dates[-1]
+        train_end_date = val_end_date - timedelta(days=self.validation_period_days)
         
-        print(f"Training period: up to {self.train_end_date.date()}")
-        print(f"Validation period: {self.train_end_date.date()} to {self.val_end_date.date()}")
+        return games, train_end_date, val_end_date
         
-    def evaluate_betting_strategy(self, bet_threshold, bet_size_base, bet_kelly_fraction,
+    def evaluate_betting_strategy(self, games, val_end_date, bet_threshold, bet_size_base, bet_kelly_fraction,
                                   bet_min_confidence, bet_max_exposure, bet_size_max_multiplier,
                                   use_overround_adjustment, confidence_scaling):
         """
         Evaluate betting strategy on validation period.
+        
+        Args:
+            games: DataFrame with game data
+            val_end_date: End date for validation period
+            [betting parameters]
         
         Returns:
             Final bankroll (negative for loss, to minimize)
@@ -107,10 +110,10 @@ class BettingOptimizer:
         
         # Initialize environment with games and model
         env = Environment(
-            games=self.games.copy(),
+            games=games.copy(),
             model=model,
             start_date=None,  # Start from beginning
-            end_date=self.val_end_date,
+            end_date=val_end_date,
             init_bankroll=1000.0,
             min_bet=5,
             max_bet=100
@@ -129,6 +132,9 @@ class BettingOptimizer:
     
     def objective(self, trial):
         """Optuna objective function"""
+        
+        # Load data for this trial (each worker loads its own copy - no contention!)
+        games, train_end_date, val_end_date = self._load_and_split_data()
         
         # Suggest betting strategy parameters
         # Edge threshold: 0-12% (adjusted from 0-15% to be more realistic)
@@ -156,8 +162,10 @@ class BettingOptimizer:
         confidence_scaling = trial.suggest_categorical('confidence_scaling', [True, False])
         
         try:
-            # Evaluate on validation set
+            # Evaluate on validation set (pass games data to avoid shared state)
             profit = self.evaluate_betting_strategy(
+                games=games,
+                val_end_date=val_end_date,
                 bet_threshold=bet_threshold,
                 bet_size_base=bet_size_base,
                 bet_kelly_fraction=bet_kelly_fraction,
@@ -187,15 +195,27 @@ class BettingOptimizer:
         Returns:
             Dictionary with best parameters
         """
-        # Load and split data
-        self._load_and_split_data()
+        # Load data once to print info (each worker will load its own copy)
+        games, train_end_date, val_end_date = self._load_and_split_data()
+        print(f"Training period: up to {train_end_date.date()}")
+        print(f"Validation period: {train_end_date.date()} to {val_end_date.date()}")
         
         # Setup storage for parallel execution
         if n_jobs != 1 and storage is None:
             storage = f'sqlite:///{study_name}.db'
             print(f"Using SQLite storage: {storage}")
+            print(f"Note: Each worker loads its own data copy for parallel safety")
         
-        # Create study
+        # Create study with optimized SQLite settings for parallel execution
+        if storage and storage.startswith('sqlite'):
+            # Use WAL mode for better concurrent writes
+            import sqlite3
+            db_path = storage.replace('sqlite:///', '')
+            conn = sqlite3.connect(db_path)
+            conn.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging for concurrency
+            conn.execute('PRAGMA synchronous=NORMAL')  # Faster writes
+            conn.close()
+        
         study = optuna.create_study(
             direction='maximize',  # Maximize profit
             study_name=study_name,

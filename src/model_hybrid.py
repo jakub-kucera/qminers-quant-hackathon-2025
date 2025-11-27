@@ -12,6 +12,8 @@ import pandas as pd
 from collections import defaultdict
 from model import Model as BaseModel
 
+# todo update with these params
+# Trial 78 finished with value: 991.97 and parameters: {'ensamble_required_n': 700, 'ensamble_retrain_freq': 200, 'pythagorean_power': 1.2648619826543879, 'pythagorean_regularization': 30, 'pythagorean_decay': 0.9963425470954785, 'four_factor_required_n': 400, 'four_factor_decay': 0.9931074217129024, 'gradient_descent_epochs': 18, 'gradient_descent_min_games': 500, 'exhaustion_b2b_penalty': 1.4394055248697852, 'exhaustion_road_penalty': 0.37460025295929633, 'elo_k_base': 30, 'elo_home_advantage': 55, 'elo_margin_cap': 2, 'poisson_regularization': 3.7477530251360003, 'poisson_decay': 0.9923096884647231, 'rolling_window_short': 7, 'rolling_window_med': 10, 'rolling_window_long': 20, 'pepe_min_edge': 0.06048436147312784, 'pepe_kelly_fraction': 0.4665310676437708, 'pepe_value_multiplier': 3.9109785512495705, 'pepe_confidence_threshold': 0.6137103272905797, 'pepe_max_bet_fraction': 0.10837558941322421, 'pepe_max_total_exposure': 0.5672080475825568, 'pepe_confidence_weight_separation': 0.6917257215284575, 'pepe_confidence_weight_certainty': 0.08693580383520681}. Best is trial 78 with value: 991.97.
 
 class Model(BaseModel):
     """
@@ -39,24 +41,33 @@ class Model(BaseModel):
                  rolling_window_short=5,
                  rolling_window_med=10,
                  rolling_window_long=25,
-                 # Pepe's betting strategy parameters (optimized from 200 trials)
-                 pepe_min_edge=0.041259553272506584,
-                 pepe_kelly_fraction=0.2860406159317642,
-                 pepe_value_multiplier=2.9477943166836127,
-                 pepe_confidence_threshold=0.5900017227196364,
-                 pepe_max_bet_fraction=0.1,  # Max 10% of bankroll per bet
-                 pepe_max_total_exposure=0.95):  # Max 95% total exposure
+                 # Pepe's betting strategy parameters (optimized via optimize_hybrid.py)
+                 # Latest optimization: +$235.06 profit (+23.51% ROI) - improved from +$217.99
+                 pepe_min_edge=0.046423137057078435,
+                 pepe_kelly_fraction=0.552827427237905,
+                 pepe_value_multiplier=2.9637881191637097,
+                 pepe_confidence_threshold=0.5298639562378603,
+                 pepe_max_bet_fraction=0.2163508485047783,
+                 pepe_max_total_exposure=0.7430479449034681,
+                 # Confidence calculation weights (Pepe's multi-factor approach)
+                 # Optimized weights: certainty-focused approach
+                 pepe_confidence_weight_separation=0.314095486197955,
+                 pepe_confidence_weight_certainty=0.555236810991537,
+                 pepe_confidence_weight_form=0.130667702810508):
         """
         Initialize hybrid model with your prediction model and Pepe's betting parameters.
         
         Args:
             [Your existing parameters - unchanged]
-            pepe_min_edge: Minimum edge required to place bet (4.13%)
-            pepe_kelly_fraction: Kelly criterion fraction (28.6%)
-            pepe_value_multiplier: Maximum value multiplier (2.95x)
-            pepe_confidence_threshold: Minimum confidence to bet (59%)
-            pepe_max_bet_fraction: Maximum bet as fraction of bankroll (10%)
-            pepe_max_total_exposure: Maximum total exposure across all bets (95%)
+            pepe_min_edge: Minimum edge required to place bet (4.64%)
+            pepe_kelly_fraction: Kelly criterion fraction (55.3%)
+            pepe_value_multiplier: Maximum value multiplier (2.96x)
+            pepe_confidence_threshold: Minimum confidence to bet (53.0%)
+            pepe_max_bet_fraction: Maximum bet as fraction of bankroll (21.6%)
+            pepe_max_total_exposure: Maximum total exposure across all bets (74.3%)
+            pepe_confidence_weight_separation: Weight for probability separation (31.4%)
+            pepe_confidence_weight_certainty: Weight for entropy-based certainty (55.5%)
+            pepe_confidence_weight_form: Weight for form consistency (13.1%)
         """
         # Initialize base model with your prediction parameters
         super().__init__(
@@ -98,6 +109,14 @@ class Model(BaseModel):
         self.pepe_max_bet_fraction = pepe_max_bet_fraction
         self.pepe_max_total_exposure = pepe_max_total_exposure
         
+        # Confidence calculation weights - normalize to ensure they sum to 1.0
+        weight_sum = (pepe_confidence_weight_separation + 
+                     pepe_confidence_weight_certainty + 
+                     pepe_confidence_weight_form)
+        self.pepe_confidence_weight_separation = pepe_confidence_weight_separation / weight_sum
+        self.pepe_confidence_weight_certainty = pepe_confidence_weight_certainty / weight_sum
+        self.pepe_confidence_weight_form = pepe_confidence_weight_form / weight_sum
+        
         # Track recent results for form consistency calculation
         self.team_recent_results = defaultdict(list)
         self.rolling_window = 14  # Same as Pepe's
@@ -127,11 +146,11 @@ class Model(BaseModel):
         away_var = np.var(away_form) if len(away_form) > 1 else 0.0
         form_consistency = 1.0 / (1.0 + home_var + away_var)
         
-        # Weighted combination (Pepe's weights)
+        # Weighted combination (using parametrized weights)
         confidence = (
-            0.4 * separation +
-            0.4 * certainty +
-            0.2 * form_consistency
+            self.pepe_confidence_weight_separation * separation +
+            self.pepe_confidence_weight_certainty * certainty +
+            self.pepe_confidence_weight_form * form_consistency
         )
         
         return confidence
@@ -204,7 +223,6 @@ class Model(BaseModel):
                         from sklearn.linear_model import LogisticRegression
                         self.ensamble = LogisticRegression(
                             max_iter=10000,
-                            multi_class='multinomial',
                             solver='lbfgs'
                         )
                         self.ensamble.fit(np_array[:, :-1], np_array[:, -1], sample_weight=sample_weights[::-1])
@@ -227,8 +245,9 @@ class Model(BaseModel):
                     probs_ordered = [prob_home, prob_draw, prob_away]
                     odds_ordered = [odds_home, odds_draw, odds_away]
                     
-                    # Calculate edges for each outcome
-                    edges = [probs_ordered[j] * odds_ordered[j] - 1 for j in range(3)]
+                    # Calculate edges for Home and Away only (draws cannot happen)
+                    edge_home = prob_home * odds_home - 1
+                    edge_away = prob_away * odds_away - 1
                     
                     # Calculate confidence using Pepe's method
                     confidence = self._calculate_confidence_pepe(probs_ordered, home_id, away_id)
@@ -237,9 +256,13 @@ class Model(BaseModel):
                     if confidence < self.pepe_confidence_threshold:
                         continue
                     
-                    # Find best bet (Pepe's strategy: single best outcome only)
-                    best_idx = np.argmax(edges)
-                    best_edge = edges[best_idx]
+                    # Find best bet between Home and Away only
+                    if edge_home > edge_away:
+                        best_idx = 0  # Home
+                        best_edge = edge_home
+                    else:
+                        best_idx = 2  # Away
+                        best_edge = edge_away
                     
                     # Check minimum edge
                     if best_edge > self.pepe_min_edge:
@@ -267,12 +290,10 @@ class Model(BaseModel):
                         
                         # Check if we can afford it
                         if total_bet_amount + kelly_bet <= bankroll * self.pepe_max_total_exposure:
-                            # Place bet on best outcome
+                            # Place bet on best outcome (Home or Away only)
                             if best_idx == 0:  # Home
                                 bets.at[i, 'BetH'] = kelly_bet
-                            elif best_idx == 1:  # Draw
-                                bets.at[i, 'BetD'] = kelly_bet
-                            else:  # Away
+                            else:  # Away (best_idx == 2)
                                 bets.at[i, 'BetA'] = kelly_bet
                             
                             total_bet_amount += kelly_bet

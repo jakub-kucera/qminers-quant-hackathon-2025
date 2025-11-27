@@ -33,36 +33,41 @@ from environment import Environment
 class HybridOptimizer:
     """Optimize Pepe's betting strategy parameters in hybrid model"""
     
-    def __init__(self, validation_period_days=365):
+    def __init__(self, validation_period_days=365, data_path="../data/games.csv"):
         """
         Args:
             validation_period_days: Number of days to use for validation
+            data_path: Path to the games CSV file
         """
         self.validation_period_days = validation_period_days
-        self.games = None
-        self.train_end_date = None
-        self.val_end_date = None
+        self.data_path = data_path
         
     def _load_and_split_data(self):
-        """Load data and create train/validation split"""
-        # Load games data
-        self.games = pd.read_csv("../data/games.csv", index_col=0, parse_dates=["Date", "Open"])
+        """Load data and create train/validation split - called in each trial for parallel safety"""
+        # Load games data (each worker loads its own copy)
+        games = pd.read_csv(self.data_path, index_col=0, parse_dates=["Date", "Open"])
         
         # Get all game dates
-        all_dates = sorted(self.games['Date'].unique())
+        all_dates = sorted(games['Date'].unique())
         
         # Use last validation_period_days for validation
-        self.val_end_date = all_dates[-1]
-        self.train_end_date = self.val_end_date - timedelta(days=self.validation_period_days)
+        val_end_date = all_dates[-1]
+        train_end_date = val_end_date - timedelta(days=self.validation_period_days)
         
-        print(f"Training period: up to {self.train_end_date.date()}")
-        print(f"Validation period: {self.train_end_date.date()} to {self.val_end_date.date()}")
+        return games, train_end_date, val_end_date
         
-    def evaluate_hybrid_strategy(self, pepe_min_edge, pepe_kelly_fraction, 
+    def evaluate_hybrid_strategy(self, games, val_end_date, pepe_min_edge, pepe_kelly_fraction, 
                                  pepe_value_multiplier, pepe_confidence_threshold,
-                                 pepe_max_bet_fraction, pepe_max_total_exposure):
+                                 pepe_max_bet_fraction, pepe_max_total_exposure,
+                                 pepe_confidence_weight_separation, pepe_confidence_weight_certainty,
+                                 pepe_confidence_weight_form):
         """
         Evaluate Pepe's betting strategy parameters on validation period.
+        
+        Args:
+            games: DataFrame with game data
+            val_end_date: End date for validation period
+            [betting parameters]
         
         Returns:
             Final profit (to maximize)
@@ -95,15 +100,19 @@ class HybridOptimizer:
             pepe_value_multiplier=pepe_value_multiplier,
             pepe_confidence_threshold=pepe_confidence_threshold,
             pepe_max_bet_fraction=pepe_max_bet_fraction,
-            pepe_max_total_exposure=pepe_max_total_exposure
+            pepe_max_total_exposure=pepe_max_total_exposure,
+            # Confidence calculation weights (being optimized)
+            pepe_confidence_weight_separation=pepe_confidence_weight_separation,
+            pepe_confidence_weight_certainty=pepe_confidence_weight_certainty,
+            pepe_confidence_weight_form=pepe_confidence_weight_form
         )
         
         # Initialize environment with games and model
         env = Environment(
-            games=self.games.copy(),
+            games=games.copy(),
             model=model,
             start_date=None,  # Start from beginning
-            end_date=self.val_end_date,
+            end_date=val_end_date,
             init_bankroll=1000.0,
             min_bet=5,
             max_bet=100
@@ -123,35 +132,59 @@ class HybridOptimizer:
     def objective(self, trial):
         """Optuna objective function"""
         
+        # Load data for this trial (each worker loads its own copy - no contention!)
+        games, train_end_date, val_end_date = self._load_and_split_data()
+        
         # Suggest Pepe's betting strategy parameters
+        # Narrowed ranges around optimized values for fine-tuning
         
-        # Minimum edge: 2-10% (Pepe's optimized was 4.13%)
-        pepe_min_edge = trial.suggest_float('pepe_min_edge', 0.02, 0.10)
+        # Minimum edge: 4-7% (optimized was 5.42%, ±25%)
+        pepe_min_edge = trial.suggest_float('pepe_min_edge', 0.04, 0.07)
         
-        # Kelly fraction: 10-50% (Pepe's optimized was 28.6%)
-        pepe_kelly_fraction = trial.suggest_float('pepe_kelly_fraction', 0.10, 0.50)
+        # Kelly fraction: 35-60% (optimized was 49.6%, ±20%)
+        pepe_kelly_fraction = trial.suggest_float('pepe_kelly_fraction', 0.35, 0.60)
         
-        # Value multiplier: 1.5-5.0x (Pepe's optimized was 2.95)
-        pepe_value_multiplier = trial.suggest_float('pepe_value_multiplier', 1.5, 5.0)
+        # Value multiplier: 1.8-3.0x (optimized was 2.34, ±25%)
+        pepe_value_multiplier = trial.suggest_float('pepe_value_multiplier', 1.8, 3.0)
         
-        # Confidence threshold: 40-80% (Pepe's optimized was 59%)
-        pepe_confidence_threshold = trial.suggest_float('pepe_confidence_threshold', 0.40, 0.80)
+        # Confidence threshold: 50-70% (optimized was 58.4%, ±15%)
+        pepe_confidence_threshold = trial.suggest_float('pepe_confidence_threshold', 0.50, 0.70)
         
-        # Max bet fraction: 5-20% of bankroll (Pepe's was 10%)
-        pepe_max_bet_fraction = trial.suggest_float('pepe_max_bet_fraction', 0.05, 0.20)
+        # Max bet fraction: 14-25% of bankroll (optimized was 19.8%, ±25%)
+        pepe_max_bet_fraction = trial.suggest_float('pepe_max_bet_fraction', 0.14, 0.25)
         
-        # Max total exposure: 70-100% (Pepe's was 95%)
-        pepe_max_total_exposure = trial.suggest_float('pepe_max_total_exposure', 0.70, 1.00)
+        # Max total exposure: 55-85% (optimized was 70.3%, ±20%)
+        pepe_max_total_exposure = trial.suggest_float('pepe_max_total_exposure', 0.55, 0.85)
+        
+        # Confidence calculation weights (defaults: 0.4, 0.4, 0.2)
+        # Sample only 2 weights, derive the 3rd to ensure they sum to 1.0
+        # Separation: probability difference between top 2 outcomes
+        pepe_confidence_weight_separation = trial.suggest_float('pepe_confidence_weight_separation', 0.1, 0.8)
+        # Certainty: entropy-based measure
+        pepe_confidence_weight_certainty = trial.suggest_float('pepe_confidence_weight_certainty', 0.1, 0.8)
+        # Form: derived to ensure sum = 1.0
+        pepe_confidence_weight_form = 1.0 - pepe_confidence_weight_separation - pepe_confidence_weight_certainty
+        
+        # Ensure form weight is valid (positive and reasonable)
+        # If the sampled weights are too high, this trial will naturally perform poorly
+        if pepe_confidence_weight_form < 0.05 or pepe_confidence_weight_form > 0.8:
+            # Return poor result for invalid weight combinations
+            return float('-inf')
         
         try:
-            # Evaluate on validation set
+            # Evaluate on validation set (pass games data to avoid shared state)
             profit = self.evaluate_hybrid_strategy(
+                games=games,
+                val_end_date=val_end_date,
                 pepe_min_edge=pepe_min_edge,
                 pepe_kelly_fraction=pepe_kelly_fraction,
                 pepe_value_multiplier=pepe_value_multiplier,
                 pepe_confidence_threshold=pepe_confidence_threshold,
                 pepe_max_bet_fraction=pepe_max_bet_fraction,
-                pepe_max_total_exposure=pepe_max_total_exposure
+                pepe_max_total_exposure=pepe_max_total_exposure,
+                pepe_confidence_weight_separation=pepe_confidence_weight_separation,
+                pepe_confidence_weight_certainty=pepe_confidence_weight_certainty,
+                pepe_confidence_weight_form=pepe_confidence_weight_form
             )
             
             return profit
@@ -173,15 +206,27 @@ class HybridOptimizer:
         Returns:
             Dictionary with best parameters
         """
-        # Load and split data
-        self._load_and_split_data()
+        # Load data once to print info (each worker will load its own copy)
+        games, train_end_date, val_end_date = self._load_and_split_data()
+        print(f"Training period: up to {train_end_date.date()}")
+        print(f"Validation period: {train_end_date.date()} to {val_end_date.date()}")
         
         # Setup storage for parallel execution
         if n_jobs != 1 and storage is None:
             storage = f'sqlite:///{study_name}.db'
             print(f"Using SQLite storage: {storage}")
+            print(f"Note: Each worker loads its own data copy for parallel safety")
         
-        # Create study
+        # Create study with optimized SQLite settings for parallel execution
+        if storage and storage.startswith('sqlite'):
+            # Use WAL mode for better concurrent writes
+            import sqlite3
+            db_path = storage.replace('sqlite:///', '')
+            conn = sqlite3.connect(db_path)
+            conn.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging for concurrency
+            conn.execute('PRAGMA synchronous=NORMAL')  # Faster writes
+            conn.close()
+        
         study = optuna.create_study(
             direction='maximize',  # Maximize profit
             study_name=study_name,
@@ -214,6 +259,11 @@ class HybridOptimizer:
         print(f"  pepe_confidence_threshold: {best_params['pepe_confidence_threshold']:.4f}")
         print(f"  pepe_max_bet_fraction: {best_params['pepe_max_bet_fraction']:.4f}")
         print(f"  pepe_max_total_exposure: {best_params['pepe_max_total_exposure']:.4f}")
+        print(f"  pepe_confidence_weight_separation: {best_params['pepe_confidence_weight_separation']:.4f}")
+        print(f"  pepe_confidence_weight_certainty: {best_params['pepe_confidence_weight_certainty']:.4f}")
+        # Calculate derived form weight (not directly optimized)
+        pepe_confidence_weight_form = 1.0 - best_params['pepe_confidence_weight_separation'] - best_params['pepe_confidence_weight_certainty']
+        print(f"  pepe_confidence_weight_form: {pepe_confidence_weight_form:.4f}")
         
         return study.best_params
 
@@ -256,7 +306,10 @@ model = Model(
     pepe_value_multiplier={best_params['pepe_value_multiplier']},
     pepe_confidence_threshold={best_params['pepe_confidence_threshold']},
     pepe_max_bet_fraction={best_params['pepe_max_bet_fraction']},
-    pepe_max_total_exposure={best_params['pepe_max_total_exposure']}
+    pepe_max_total_exposure={best_params['pepe_max_total_exposure']},
+    pepe_confidence_weight_separation={best_params['pepe_confidence_weight_separation']},
+    pepe_confidence_weight_certainty={best_params['pepe_confidence_weight_certainty']},
+    pepe_confidence_weight_form={best_params['pepe_confidence_weight_form']}
 )
 """)
 
