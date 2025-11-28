@@ -12,8 +12,6 @@ import pandas as pd
 from collections import defaultdict
 from model import Model as BaseModel
 
-# todo update with these params
-# Trial 78 finished with value: 991.97 and parameters: {'ensamble_required_n': 700, 'ensamble_retrain_freq': 200, 'pythagorean_power': 1.2648619826543879, 'pythagorean_regularization': 30, 'pythagorean_decay': 0.9963425470954785, 'four_factor_required_n': 400, 'four_factor_decay': 0.9931074217129024, 'gradient_descent_epochs': 18, 'gradient_descent_min_games': 500, 'exhaustion_b2b_penalty': 1.4394055248697852, 'exhaustion_road_penalty': 0.37460025295929633, 'elo_k_base': 30, 'elo_home_advantage': 55, 'elo_margin_cap': 2, 'poisson_regularization': 3.7477530251360003, 'poisson_decay': 0.9923096884647231, 'rolling_window_short': 7, 'rolling_window_med': 10, 'rolling_window_long': 20, 'pepe_min_edge': 0.06048436147312784, 'pepe_kelly_fraction': 0.4665310676437708, 'pepe_value_multiplier': 3.9109785512495705, 'pepe_confidence_threshold': 0.6137103272905797, 'pepe_max_bet_fraction': 0.10837558941322421, 'pepe_max_total_exposure': 0.5672080475825568, 'pepe_confidence_weight_separation': 0.6917257215284575, 'pepe_confidence_weight_certainty': 0.08693580383520681}. Best is trial 78 with value: 991.97.
 
 class Model(BaseModel):
     """
@@ -21,53 +19,52 @@ class Model(BaseModel):
     """
     
     def __init__(self, 
-                 # Your existing prediction parameters
+                 # Prediction parameters - optimized via optimize_hybrid_comprehensive.py
+                 # Latest: +$1,156.57 profit (115.7% ROI)
                  ensamble_required_n=700,
-                 ensamble_retrain_freq=300,
-                 pythagorean_power=0.9815160790897732,
-                 pythagorean_regularization=10,
-                 pythagorean_decay=0.992,
+                 ensamble_retrain_freq=350,
+                 pythagorean_power=1.1484,
+                 pythagorean_regularization=30,
+                 pythagorean_decay=0.9877,
                  four_factor_required_n=400,
-                 four_factor_decay=0.9901321052235277,
-                 gradient_descent_epochs=12,
-                 gradient_descent_min_games=800,
-                 exhaustion_b2b_penalty=1.7896362263470917,
-                 exhaustion_road_penalty=0.6151810640568766,
-                 elo_k_base=20,
-                 elo_home_advantage=45,
-                 elo_margin_cap=5,
-                 poisson_regularization=3.319620279992762,
-                 poisson_decay=0.992,
-                 rolling_window_short=5,
-                 rolling_window_med=10,
-                 rolling_window_long=25,
-                 # Pepe's betting strategy parameters (optimized via optimize_hybrid.py)
-                 # Latest optimization: +$235.06 profit (+23.51% ROI) - improved from +$217.99
-                 pepe_min_edge=0.046423137057078435,
-                 pepe_kelly_fraction=0.552827427237905,
-                 pepe_value_multiplier=2.9637881191637097,
-                 pepe_confidence_threshold=0.5298639562378603,
-                 pepe_max_bet_fraction=0.2163508485047783,
-                 pepe_max_total_exposure=0.7430479449034681,
-                 # Confidence calculation weights (Pepe's multi-factor approach)
-                 # Optimized weights: certainty-focused approach
-                 pepe_confidence_weight_separation=0.314095486197955,
-                 pepe_confidence_weight_certainty=0.555236810991537,
-                 pepe_confidence_weight_form=0.130667702810508):
+                 four_factor_decay=0.9944,
+                 gradient_descent_epochs=16,
+                 gradient_descent_min_games=500,
+                 exhaustion_b2b_penalty=1.6393,
+                 exhaustion_road_penalty=0.3001,
+                 elo_k_base=25,
+                 elo_home_advantage=20,
+                 elo_margin_cap=3,
+                 poisson_regularization=2.0007,
+                 poisson_decay=0.9864,
+                 rolling_window_short=8,
+                 rolling_window_med=14,
+                 rolling_window_long=19,
+                 # Betting strategy parameters - optimized
+                 pepe_min_edge=0.0426,
+                 pepe_kelly_fraction=0.3820,
+                 pepe_value_multiplier=3.8975,
+                 pepe_confidence_threshold=0.6332,
+                 pepe_max_bet_fraction=0.1162,
+                 pepe_max_total_exposure=0.5547,
+                 # Confidence calculation weights - balanced approach
+                 pepe_confidence_weight_separation=0.6034,
+                 pepe_confidence_weight_certainty=0.0903,
+                 pepe_confidence_weight_form=0.3063):
         """
-        Initialize hybrid model with your prediction model and Pepe's betting parameters.
+        Initialize hybrid model with prediction model and Pepe's betting parameters.
         
         Args:
-            [Your existing parameters - unchanged]
-            pepe_min_edge: Minimum edge required to place bet (4.64%)
-            pepe_kelly_fraction: Kelly criterion fraction (55.3%)
-            pepe_value_multiplier: Maximum value multiplier (2.96x)
-            pepe_confidence_threshold: Minimum confidence to bet (53.0%)
-            pepe_max_bet_fraction: Maximum bet as fraction of bankroll (21.6%)
-            pepe_max_total_exposure: Maximum total exposure across all bets (74.3%)
-            pepe_confidence_weight_separation: Weight for probability separation (31.4%)
-            pepe_confidence_weight_certainty: Weight for entropy-based certainty (55.5%)
-            pepe_confidence_weight_form: Weight for form consistency (13.1%)
+            [Prediction parameters - optimized]
+            pepe_min_edge: Minimum edge required to place bet (4.3%)
+            pepe_kelly_fraction: Kelly criterion fraction (38.2%)
+            pepe_value_multiplier: Maximum value multiplier (3.90x)
+            pepe_confidence_threshold: Minimum confidence to bet (63.3%)
+            pepe_max_bet_fraction: Maximum bet as fraction of bankroll (11.6%)
+            pepe_max_total_exposure: Maximum total exposure across all bets (55.5%)
+            pepe_confidence_weight_separation: Weight for probability separation (60.3%)
+            pepe_confidence_weight_certainty: Weight for entropy-based certainty (9.0%)
+            pepe_confidence_weight_form: Weight for form consistency (30.6%)
         """
         # Initialize base model with your prediction parameters
         super().__init__(

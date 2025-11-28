@@ -244,7 +244,7 @@ class Model(BaseModel):
                     probs_ordered = [prob_home, prob_draw, prob_away]
                     odds_ordered = [odds_home, odds_draw, odds_away]
                     
-                    # Calculate edges for Home and Away only (draws cannot happen)
+                    # Calculate edges for Home and Away only (no draw betting)
                     edge_home = prob_home * odds_home - 1
                     edge_away = prob_away * odds_away - 1
                     

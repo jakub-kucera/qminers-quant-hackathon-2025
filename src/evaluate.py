@@ -2,7 +2,8 @@ import pandas as pd
 
 # from model_pepe import Model
 # from model_hybrid import Model
-from model import Model
+# from model import Model
+from model_bookie_rookie import Model
 from environment import Environment
 
 # games = pd.read_csv("../data/games.csv", index_col=0, parse_dates=["Date", "Open"])
