@@ -21,33 +21,33 @@ class Model(BaseModel):
                  # Prediction parameters - optimized via optimize_hybrid_comprehensive.py
                  ensamble_required_n=700,
                  ensamble_retrain_freq=350,
-                 pythagorean_power=1.2654047896737288,
-                 pythagorean_regularization=35,
-                 pythagorean_decay=0.9914605630145961,
+                 pythagorean_power=1.0468184350832361,
+                 pythagorean_regularization=30,
+                 pythagorean_decay=0.9822964120272627,
                  four_factor_required_n=400,
-                 four_factor_decay=0.9906944262706785,
+                 four_factor_decay=0.9916597424416206,
                  gradient_descent_epochs=15,
                  gradient_descent_min_games=500,
-                 exhaustion_b2b_penalty=1.6122378907451644,
+                 exhaustion_b2b_penalty=1.6666338402045837,
                  exhaustion_road_penalty=0.3098116140922794,
-                 elo_k_base=25,
-                 elo_home_advantage=40,
+                 elo_k_base=20,
+                 elo_home_advantage=30,
                  elo_margin_cap=5,
-                 poisson_regularization=3.9821364645005977,
-                 poisson_decay=0.9962778533599858,
+                 poisson_regularization=3.7095404610906284,
+                 poisson_decay=0.9934047897209451,
                  rolling_window_short=3,
-                 rolling_window_med=14,
-                 rolling_window_long=22,
+                 rolling_window_med=16,
+                 rolling_window_long=24,
                  # Betting strategy parameters - optimized
-                 pepe_min_edge=0.07642150043685061,
-                 pepe_kelly_fraction=0.5577068347747918,
-                 pepe_value_multiplier=3.8955878786984246,
-                 pepe_confidence_threshold=0.6058143644490847,
-                 pepe_max_bet_fraction=0.2707878837511299,
-                 pepe_max_total_exposure=0.9303174396487595,
+                 pepe_min_edge=0.053442535743802144,
+                 pepe_kelly_fraction=0.4978664986203395,
+                 pepe_value_multiplier=1.621010771577343,
+                 pepe_confidence_threshold=0.5537916773266711,
+                 pepe_max_bet_fraction=0.15379896883899621,
+                 pepe_max_total_exposure=0.7611977639797657,
                  # Confidence calculation weights - balanced approach
-                 pepe_confidence_weight_separation=0.4938394813836171,
-                 pepe_confidence_weight_certainty=0.4440286639439308,
+                 pepe_confidence_weight_separation=0.3129216888453512,
+                 pepe_confidence_weight_certainty=0.586798930239166,
                  pepe_confidence_weight_form=0.30176980145887625,
 
                 #  ensamble_required_n=700,
@@ -83,7 +83,7 @@ class Model(BaseModel):
 
 
                  # Season parameters
-                 start_season=2010
+                 start_season=2017
 
 
 
@@ -185,6 +185,15 @@ class Model(BaseModel):
         # pepe_confidence_weight_certainty=0.38653704271866807
         # pepe_confidence_weight_form=0.30176980145887625
 
+        # [I 2025-12-06 12:47:16,799] Trial 11 finished with value: 2329.260000000001 and parameters: {'pythagorean_power': 1.321769975045807, 'pythagorean_regularization': 30, 'pythagorean_decay': 0.9800320320471467, 'four_factor_decay': 0.9901794565403271, 'exhaustion_b2b_penalty': 1.6234659925183692, 'elo_k_base': 20, 'elo_home_advantage': 30, 'elo_margin_cap': 3, 'poisson_regularization': 3.8948865885189243, 'poisson_decay': 0.9942224213392267, 'rolling_window_short': 3, 'rolling_window_med': 11, 'rolling_window_long': 24, 'pepe_min_edge': 0.043243586175905444, 'pepe_kelly_fraction': 0.29535174468659336, 'pepe_value_multiplier': 3.2816368547493866, 'pepe_confidence_threshold': 0.4171366645923039, 'pepe_max_bet_fraction': 0.23597460937424683, 'pepe_max_total_exposure': 0.8702271644603329, 'pepe_confidence_weight_separation': 0.45289242173927946, 'pepe_confidence_weight_certainty': 0.2270778501367905}. Best is trial 11 with value: 2329.260000000001.
+        # Start: 2010-09-17 00:00:00, End: 2015-05-03 00:00:00
+
+
+        # [I 2025-12-06 11:56:42,032] Trial 6 finished with value: 1228.3600000000001 and parameters: {'pythagorean_power': 1.2654047896737288, 'pythagorean_regularization': 35, 'pythagorean_decay': 0.9914605630145961, 'four_factor_decay': 0.9906944262706785, 'exhaustion_b2b_penalty': 1.6122378907451644, 'elo_k_base': 25, 'elo_home_advantage': 40, 'elo_margin_cap': 5, 'poisson_regularization': 3.9821364645005977, 'poisson_decay': 0.9962778533599858, 'rolling_window_short': 3, 'rolling_window_med': 14, 'rolling_window_long': 22, 'pepe_min_edge': 0.07642150043685061, 'pepe_kelly_fraction': 0.5577068347747918, 'pepe_value_multiplier': 3.8955878786984246, 'pepe_confidence_threshold': 0.6058143644490847, 'pepe_max_bet_fraction': 0.2707878837511299, 'pepe_max_total_exposure': 0.9303174396487595, 'pepe_confidence_weight_separation': 0.4938394813836171, 'pepe_confidence_weight_certainty': 0.4440286639439308}. Best is trial 6 with value: 1228.3600000000001.
+
+
+        # Trial 4 finished with value: 663.5200000000002 and parameters: {'pythagorean_power': 1.245349303707702, 'pythagorean_regularization': 35, 'pythagorean_decay': 0.9816975698213111, 'four_factor_decay': 0.9940695069409855, 'exhaustion_b2b_penalty': 1.9433134641813266, 'elo_k_base': 15, 'elo_home_advantage': 55, 'elo_margin_cap': 6, 'poisson_regularization': 3.001960984688327, 'poisson_decay': 0.9954970289486959, 'rolling_window_short': 3, 'rolling_window_med': 11, 'rolling_window_long': 22, 'pepe_min_edge': 0.08844957652020809, 'pepe_kelly_fraction': 0.44861602416348356, 'pepe_value_multiplier': 1.9363654507390748, 'pepe_confidence_threshold': 0.6115192945611814, 'pepe_max_bet_fraction': 0.09557015176567897, 'pepe_max_total_exposure': 0.858155589676336, 'pepe_confidence_weight_separation': 0.27937591015863916, 'pepe_confidence_weight_certainty': 0.38653704271866807}. Best is trial 4 with value: 663.5200000000002.
+
     def _calculate_confidence_pepe(self, probs, home_id, away_id):
         """
         Calculate confidence using Pepe's multi-factor approach:
@@ -259,7 +268,7 @@ class Model(BaseModel):
 
         bets = pd.DataFrame(
             data=np.zeros((len(opps), 3)),
-            columns=["BetH", "BetD", "BetA"],
+            columns=["BetH", "BetA", "BetD"],
             index=opps.index
         )
 

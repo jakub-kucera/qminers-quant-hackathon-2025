@@ -32,7 +32,7 @@ from environment import Environment
 class HybridComprehensiveOptimizer:
     """Optimize both prediction and betting parameters for hybrid model"""
     
-    def __init__(self, validation_period_days=365, data_path="../data/train_games.csv"):
+    def __init__(self, validation_period_days=365, data_path="../data/round2_games.csv"):
         """
         Args:
             validation_period_days: Number of days to use for validation
