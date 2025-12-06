@@ -321,4 +321,59 @@ class Model(BaseModel):
                     # Calculate confidence using Pepe's method
                     confidence = self._calculate_confidence_pepe(probs_ordered, home_id, away_id)
 
-                    # Check confidence
+                    # Check confidence threshold
+                    if confidence < self.pepe_confidence_threshold:
+                        continue
+
+                    # Find best bet between Home and Away only
+                    if edge_home > edge_away:
+                        best_idx = 0  # Home
+                        best_edge = edge_home
+                    else:
+                        best_idx = 2  # Away
+                        best_edge = edge_away
+
+                    # Check minimum edge
+                    if best_edge > self.pepe_min_edge:
+                        # Calculate value score (Pepe's approach)
+                        value_score = best_edge / self.pepe_min_edge
+
+                        # Kelly bet with value multiplier and confidence scaling
+                        kelly_bet = (
+                            self.pepe_kelly_fraction *
+                            best_edge *
+                            bankroll *
+                            min(self.pepe_value_multiplier, value_score) *
+                            confidence
+                        )
+
+                        # Apply constraints
+                        kelly_bet = max(min_bet, min(
+                            kelly_bet,
+                            max_bet,
+                            bankroll * self.pepe_max_bet_fraction
+                        ))
+
+                        # Round to integer
+                        kelly_bet = np.round(kelly_bet)
+
+                        # Check if we can afford it
+                        if total_bet_amount + kelly_bet <= bankroll * self.pepe_max_total_exposure:
+                            # Place bet on best outcome (Home or Away only)
+                            if best_idx == 0:  # Home
+                                bets.at[i, 'BetH'] = kelly_bet
+                            else:  # Away (best_idx == 2)
+                                bets.at[i, 'BetA'] = kelly_bet
+
+                            total_bet_amount += kelly_bet
+
+        # Final check: ensure total doesn't exceed max exposure
+        total_bet = bets.sum().sum()
+        if total_bet > bankroll * self.pepe_max_total_exposure:
+            scale_factor = (bankroll * self.pepe_max_total_exposure) / total_bet
+            bets = bets * scale_factor
+            bets = np.round(bets)
+            # Zero out bets below minimum
+            bets[bets < min_bet] = 0
+
+        return bets
