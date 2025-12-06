@@ -33,11 +33,11 @@ def train_model_and_cache_predictions(games):
     
     # Create model with default parameters
     model = Model(
-        rolling_window_short=5,
-        rolling_window_med=10,
-        rolling_window_long=20,
-        required_games=100,
-        retrain_freq=50
+        # rolling_window_short=5,
+        # rolling_window_med=10,
+        # rolling_window_long=20,
+        # required_games=100,
+        # retrain_freq=50
     )
     
     # Run environment to get all predictions

@@ -31,7 +31,8 @@ from environment import Environment
 class BookieRookieOptimizer:
     """Optimize both prediction and betting parameters for bookie rookie model"""
     
-    def __init__(self, validation_period_days=365, data_path="../data/bookie_rookie_games.csv"):
+    # def __init__(self, validation_period_days=365, data_path="../data/bookie_rookie_games.csv"):
+    def __init__(self, validation_period_days=365, data_path="../data/train_games.csv"):
         """
         Args:
             validation_period_days: Number of days to use for validation
@@ -76,8 +77,8 @@ class BookieRookieOptimizer:
             start_date=None,  # Start from beginning
             end_date=val_end_date,
             init_bankroll=1000.0,
-            min_bet=5,
-            max_bet=100
+            min_bet=1,
+            max_bet=250
         )
         
         # Run environment

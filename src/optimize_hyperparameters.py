@@ -15,14 +15,14 @@ warnings.filterwarnings('ignore')
 # Import your model
 import sys
 sys.path.insert(0, '.')
-from model import Model
+from model_hybrid import Model
 from environment import Environment
 
 
 class ModelOptimizer:
     """Optimize model hyperparameters using Optuna"""
     
-    def __init__(self, games_path='../data/games.csv', validation_period=365):
+    def __init__(self, games_path='../data/train_games.csv', validation_period=365):
         """
         Initialize optimizer
         
@@ -61,37 +61,37 @@ class ModelOptimizer:
         # Suggest hyperparameters - focusing on most impactful ones
         params = {
             # Ensemble parameters
-            'ensamble_required_n': trial.suggest_int('ensamble_required_n', 300, 1000, step=100),
-            'ensamble_retrain_freq': trial.suggest_int('ensamble_retrain_freq', 200, 800, step=100),
+            # 'ensamble_required_n': trial.suggest_int('ensamble_required_n', 300, 1000, step=100),
+            # 'ensamble_retrain_freq': trial.suggest_int('ensamble_retrain_freq', 200, 800, step=100),
             
             # Pythagorean model
-            'pythagorean_power': trial.suggest_float('pythagorean_power', 0.8, 1.5),
-            'pythagorean_regularization': trial.suggest_int('pythagorean_regularization', 10, 40, step=5),
+            'pythagorean_power': trial.suggest_float('pythagorean_power', 0.9, 1.3),
+            'pythagorean_regularization': trial.suggest_int('pythagorean_regularization', 25, 35, step=5),
             
             # Four Factor model
-            'four_factor_required_n': trial.suggest_int('four_factor_required_n', 300, 1000, step=100),
+            # 'four_factor_required_n': trial.suggest_int('four_factor_required_n', 300, 1000, step=100),
             'four_factor_decay': trial.suggest_float('four_factor_decay', 0.990, 0.998),
             
             # Gradient Descent
-            'gradient_descent_epochs': trial.suggest_int('gradient_descent_epochs', 8, 20),
-            'gradient_descent_min_games': trial.suggest_int('gradient_descent_min_games', 300, 800, step=100),
+            # 'gradient_descent_epochs': trial.suggest_int('gradient_descent_epochs', 8, 20),
+            # 'gradient_descent_min_games': trial.suggest_int('gradient_descent_min_games', 300, 800, step=100),
             
             # Exhaustion model
-            'exhaustion_b2b_penalty': trial.suggest_float('exhaustion_b2b_penalty', 1.0, 2.5),
-            'exhaustion_road_penalty': trial.suggest_float('exhaustion_road_penalty', 0.3, 0.8),
+            'exhaustion_b2b_penalty': trial.suggest_float('exhaustion_b2b_penalty', 1.3, 23),
+            # 'exhaustion_road_penalty': trial.suggest_float('exhaustion_road_penalty', 0.3, 0.8),
             
             # ELO system
-            'elo_k_base': trial.suggest_int('elo_k_base', 10, 25),
+            'elo_k_base': trial.suggest_categorical('elo_k_base', [10, 15, 25]),
             'elo_home_advantage': trial.suggest_int('elo_home_advantage', 25, 50, step=5),
             'elo_margin_cap': trial.suggest_int('elo_margin_cap', 2, 5),
             
             # Poisson model
-            'poisson_regularization': trial.suggest_float('poisson_regularization', 2.0, 5.0),
+            'poisson_regularization': trial.suggest_float('poisson_regularization', 2.5, 4.0),
             
             # Rolling window features (NEW)
             'rolling_window_short': trial.suggest_int('rolling_window_short', 3, 7),
-            'rolling_window_med': trial.suggest_int('rolling_window_med', 8, 15),
-            'rolling_window_long': trial.suggest_int('rolling_window_long', 16, 25),
+            'rolling_window_med': trial.suggest_int('rolling_window_med', 10, 15),
+            'rolling_window_long': trial.suggest_int('rolling_window_long', 18, 25),
         }
         
         try:

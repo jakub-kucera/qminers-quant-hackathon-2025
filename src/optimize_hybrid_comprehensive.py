@@ -32,7 +32,7 @@ from environment import Environment
 class HybridComprehensiveOptimizer:
     """Optimize both prediction and betting parameters for hybrid model"""
     
-    def __init__(self, validation_period_days=365, data_path="../data/games.csv"):
+    def __init__(self, validation_period_days=365, data_path="../data/train_games.csv"):
         """
         Args:
             validation_period_days: Number of days to use for validation
@@ -70,15 +70,24 @@ class HybridComprehensiveOptimizer:
         # Create model with all parameters
         model = Model(**params)
         
+        # Determine start date based on model settings
+        start_date = None
+        if hasattr(model, 'start_season') and model.start_season:
+            # Find the first game dat of the start season
+            season_games = games[games['Season'] >= model.start_season]
+            if not season_games.empty:
+                start_date = season_games['Date'].min()
+                # print(f"Simulation starting from {start_date} (Season {model.start_season})")
+
         # Initialize environment with games and model
         env = Environment(
             games=games.copy(),
             model=model,
-            start_date=None,  # Start from beginning
+            start_date=start_date,  # Start from specific season if configured
             end_date=val_end_date,
             init_bankroll=1000.0,
-            min_bet=5,
-            max_bet=100
+            min_bet=1,
+            max_bet=250
         )
         
         # Run environment
@@ -100,75 +109,80 @@ class HybridComprehensiveOptimizer:
         
         # ===== PREDICTION MODEL PARAMETERS =====
         
-        # Ensemble parameters
-        ensamble_required_n = trial.suggest_int('ensamble_required_n', 500, 900, step=100)
-        ensamble_retrain_freq = trial.suggest_int('ensamble_retrain_freq', 200, 400, step=50)
+        # Fixed parameters (not optimized to save time)
+        ensamble_required_n = 700
+        ensamble_retrain_freq = 350
+        four_factor_required_n = 400
+        gradient_descent_epochs = 15
+        gradient_descent_min_games = 500
+        exhaustion_road_penalty = 0.3098
+        
+        # Ensemble parameters - FIXED
+        # ensamble_required_n = trial.suggest_int('ensamble_required_n', 500, 900, step=100)
+        # ensamble_retrain_freq = trial.suggest_int('ensamble_retrain_freq', 200, 400, step=50)
         
         # Pythagorean model
-        pythagorean_power = trial.suggest_float('pythagorean_power', 0.8, 1.5)
-        pythagorean_regularization = trial.suggest_int('pythagorean_regularization', 5, 30, step=5)
-        pythagorean_decay = trial.suggest_float('pythagorean_decay', 0.985, 0.998)
+        pythagorean_power = trial.suggest_float('pythagorean_power', 1.0, 1.35)
+        pythagorean_regularization = trial.suggest_categorical('pythagorean_regularization', [25, 30, 35])
+        pythagorean_decay = trial.suggest_float('pythagorean_decay', 0.980, 0.995)
         
         # Four Factor model
-        four_factor_required_n = trial.suggest_int('four_factor_required_n', 200, 600, step=100)
-        four_factor_decay = trial.suggest_float('four_factor_decay', 0.990, 0.998)
+        # four_factor_required_n = trial.suggest_int('four_factor_required_n', 200, 600, step=100)
+        four_factor_decay = trial.suggest_float('four_factor_decay', 0.990, 0.996)
         
         # Gradient Descent
-        gradient_descent_epochs = trial.suggest_int('gradient_descent_epochs', 8, 20)
-        gradient_descent_min_games = trial.suggest_int('gradient_descent_min_games', 500, 900, step=100)
+        # gradient_descent_epochs = trial.suggest_int('gradient_descent_epochs', 8, 20)
+        # gradient_descent_min_games = trial.suggest_int('gradient_descent_min_games', 500, 900, step=100)
         
         # Exhaustion model
-        exhaustion_b2b_penalty = trial.suggest_float('exhaustion_b2b_penalty', 1.0, 2.5)
-        exhaustion_road_penalty = trial.suggest_float('exhaustion_road_penalty', 0.3, 0.8)
+        exhaustion_b2b_penalty = trial.suggest_float('exhaustion_b2b_penalty', 1.5, 2.3)
+        # exhaustion_road_penalty = trial.suggest_float('exhaustion_road_penalty', 0.3, 0.8)
         
         # ELO system
-        elo_k_base = trial.suggest_int('elo_k_base', 10, 30, step=5)
-        elo_home_advantage = trial.suggest_int('elo_home_advantage', 20, 60, step=5)
-        elo_margin_cap = trial.suggest_int('elo_margin_cap', 2, 7)
+        elo_k_base = trial.suggest_categorical('elo_k_base', [15, 20, 25])
+        elo_home_advantage = trial.suggest_categorical('elo_home_advantage', [20, 30, 40, 50, 55, 60])
+        elo_margin_cap = trial.suggest_categorical('elo_margin_cap', [3, 4, 5, 6, 7])
         
         # Poisson model
-        poisson_regularization = trial.suggest_float('poisson_regularization', 2.0, 5.0)
-        poisson_decay = trial.suggest_float('poisson_decay', 0.985, 0.998)
+        poisson_regularization = trial.suggest_float('poisson_regularization', 2.0, 4.0)
+        poisson_decay = trial.suggest_float('poisson_decay', 0.990, 0.997)
         
         # Rolling window features
-        rolling_window_short = trial.suggest_int('rolling_window_short', 3, 8)
-        rolling_window_med = trial.suggest_int('rolling_window_med', 8, 15)
-        rolling_window_long = trial.suggest_int('rolling_window_long', 16, 30)
+        rolling_window_short = trial.suggest_categorical('rolling_window_short', [3, 5, 8])
+        rolling_window_med = trial.suggest_categorical('rolling_window_med', [11, 14, 16])
+        rolling_window_long = trial.suggest_categorical('rolling_window_long', [20, 22, 24, 26])
         
         # ===== BETTING STRATEGY PARAMETERS =====
         
         # Minimum edge: Lower = more bets, higher = more selective
-        # Range: 3-8% (reasonable profitable edge threshold)
-        pepe_min_edge = trial.suggest_float('pepe_min_edge', 0.03, 0.08)
+        # Range: 4-9% based on model_hybrid.py values (0.0438, 0.0799)
+        pepe_min_edge = trial.suggest_float('pepe_min_edge', 0.04, 0.09)
         
         # Kelly fraction: Lower = conservative, higher = aggressive
-        # Range: 30-70% (standard Kelly is often too aggressive)
-        pepe_kelly_fraction = trial.suggest_float('pepe_kelly_fraction', 0.30, 0.70)
+        # Range: 25-65% based on model_hybrid.py values (0.308, 0.565)
+        pepe_kelly_fraction = trial.suggest_float('pepe_kelly_fraction', 0.25, 0.65)
         
         # Value multiplier: Cap on how much to increase bet based on value
-        # Range: 1.5-4.0x (limits bet size on high-value opportunities)
+        # Range: 1.5-4.0x based on model_hybrid.py values (1.76, 3.88)
         pepe_value_multiplier = trial.suggest_float('pepe_value_multiplier', 1.5, 4.0)
         
         # Confidence threshold: Minimum confidence to place any bet
-        # Range: 45-70% (balance between selectivity and opportunity)
-        pepe_confidence_threshold = trial.suggest_float('pepe_confidence_threshold', 0.45, 0.70)
+        # Range: 40-65% based on model_hybrid.py values (0.45, 0.617)
+        pepe_confidence_threshold = trial.suggest_float('pepe_confidence_threshold', 0.40, 0.65)
         
         # Max bet fraction: Largest single bet as % of bankroll
-        # Range: 10-30% (risk management - never bet too much on one game)
-        pepe_max_bet_fraction = trial.suggest_float('pepe_max_bet_fraction', 0.10, 0.30)
+        # Range: 8-30% based on model_hybrid.py values (0.10, 0.248)
+        pepe_max_bet_fraction = trial.suggest_float('pepe_max_bet_fraction', 0.08, 0.30)
         
         # Max total exposure: Total capital at risk across all pending bets
-        # Range: 50-90% (balance between opportunity and safety)
-        pepe_max_total_exposure = trial.suggest_float('pepe_max_total_exposure', 0.50, 0.90)
+        # Range: 60-95% based on model_hybrid.py values (0.67, 0.899)
+        pepe_max_total_exposure = trial.suggest_float('pepe_max_total_exposure', 0.60, 0.95)
         
         # Confidence weights: Sample with constraints to ensure all weights are valid
-        # Strategy: Sample first two weights such that the third is guaranteed to be in [0.05, 0.8]
-        # If w1 + w2 > 0.95, then w3 < 0.05 (invalid)
-        # If w1 + w2 < 0.2, then w3 > 0.8 (invalid)
-        # So we need: 0.2 <= w1 + w2 <= 0.95
+        # Range: 10-60% for separation (based on 0.115, 0.548)
         
         # Sample separation weight
-        pepe_confidence_weight_separation = trial.suggest_float('pepe_confidence_weight_separation', 0.05, 0.8)
+        pepe_confidence_weight_separation = trial.suggest_float('pepe_confidence_weight_separation', 0.10, 0.60)
         
         # Sample certainty weight with constraint based on separation
         # We need: 0.2 - separation <= certainty <= 0.95 - separation
