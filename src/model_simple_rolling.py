@@ -13,6 +13,7 @@ import pandas as pd
 from collections import defaultdict
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+# import xgboost as xgb
 
 
 class RollingWindowFeatures:
@@ -244,30 +245,32 @@ class Model:
                  required_games=100,
                  retrain_freq=50,
                  # Betting strategy parameters
-                #  min_edge=0.1374,  # Minimum edge to place bet (2%)
-                #  max_kelly_fraction=0.0980,  # Maximum Kelly fraction (25%)
-                #  kelly_multiplier=0.7867,  # Multiplier on Kelly bet size
-                #  normalize_odds=False,
-                #  min_probability=0.8,
 
+                 # Final part 1 - best parames with SOG included. + ~$478$
+                 start_season=2015,
+                end_year=2018,
 
+                 #
+                 # min_edge=0.1164,
+                 # max_kelly_fraction=0.3005,
+                 # kelly_multiplier=0.6071,
+                 # normalize_odds=False,
+                 # min_probability=0.7903
 
-                # best parames with SOG included. + ~400$
-                 min_edge=0.1768,
-                 max_kelly_fraction=0.1057,
-                 kelly_multiplier=1.7112,
-                 normalize_odds=False,
-                 min_probability=0.9430
+                 #
+                 # min_edge=0.1314,
+                 # max_kelly_fraction=0.2968,
+                 # kelly_multiplier=1.2828,
+                 # normalize_odds=False,
+                 # min_probability=0.8448
 
+                min_edge=0.0127,
+                max_kelly_fraction=0.4391,
+                kelly_multiplier=1.8701,
+                normalize_odds=False,
+                min_probability=0.7002
 
-                # # best parames without SOG included. + ~309$
-                # min_edge=0.1347,
-                # max_kelly_fraction=0.1358,
-                # kelly_multiplier=1.3437,
-                # normalize_odds=False,
-                # min_probability=0.5112
-
-                 ): 
+                  ):
         """
         Initialize simple rolling window model
         
@@ -277,11 +280,14 @@ class Model:
             rolling_window_long: Long-term window size (season performance)
             required_games: Minimum games before making predictions
             retrain_freq: How often to retrain the model
+            start_season: First season to use for training/betting (e.g. 2009)
         """
         self.required_games = required_games
         self.retrain_freq = retrain_freq
         self.retrain_counter = retrain_freq
-        
+        self.start_season = start_season
+        self.end_year = end_year
+
         # Betting strategy parameters
         self.min_edge = min_edge
         self.max_kelly_fraction = max_kelly_fraction
@@ -344,6 +350,17 @@ class Model:
         # Make predictions for each game
         for i in opps.index:
             current = opps.loc[i]
+            
+            # Check season filter
+            if self.start_season and int(current['Season']) < self.start_season:
+                # print(f"⚠️  Skipping game {i} on {current['Date']}: Season {current['Season']} is before start season {self.start_season}")
+                continue
+            # Check end_year filter - stop before year after end_year
+            if getattr(self, 'end_year', None) and int(current['Season']) > self.end_year:
+                # Skip games beyond the end year
+                # print(f"⚠️  Skipping game {i} on {current['Date']}: Season {current['Season']} is after end_year {self.end_year}")
+                continue
+
             home_id = current['HID']
             away_id = current['AID']
             
@@ -352,10 +369,10 @@ class Model:
             
             if features is None or self.model is None:
                 # Warn if we can't make prediction
-                if features is None:
-                    print(f"⚠️  Cannot predict game {i} on {current['Date']}: Insufficient rolling window data for teams {home_id} vs {away_id}")
-                if self.model is None:
-                    print(f"⚠️  Cannot predict game {i}: Model not trained yet")
+                # if features is None:
+                #     print(f"⚠️  Cannot predict game {i} on {current['Date']}: Insufficient rolling window data for teams {home_id} vs {away_id}")
+                # if self.model is None:
+                #     print(f"⚠️  Cannot predict game {i}: Model not trained yet")
                 continue
             
             # Predict probability of home win
@@ -406,6 +423,14 @@ class Model:
     
     def _process_game(self, game):
         """Process a completed game and track accuracy"""
+        # Check season filter
+        if self.start_season and game['Season'] < self.start_season:
+            # print(f"⚠️  Skipping game du to the current season being lower than the start season {self.start_season} >= {game['Season']}")
+            return
+        # Check end_year filter
+        if getattr(self, 'end_year', None) and game['Season'] > self.end_year:
+            return
+
         home_id = game['HID']
         away_id = game['AID']
         
@@ -426,7 +451,7 @@ class Model:
             if self.predictions_made % 50 == 0:
                 accuracy = self.predictions_correct / self.predictions_made
                 self.accuracy_history.append(accuracy)
-                print(f"📊 Model Accuracy: {accuracy:.2%} ({self.predictions_correct}/{self.predictions_made})")
+                # print(f"📊 Model Accuracy: {accuracy:.2%} ({self.predictions_correct}/{self.predictions_made})")
         
         # Add to training data if features available
         if features is not None:
@@ -458,4 +483,13 @@ class Model:
             solver='lbfgs',
             random_state=42
         )
+        # # use xgboost instead
+        # self.model = xgb.XGBClassifier(
+        #     max_depth=5,
+        #     learning_rate=0.1,
+        #     n_estimators=100,
+        #     subsample=0.8,
+        #     colsample_bytree=0.8,
+        #     random_state=42
+        # )
         self.model.fit(X_scaled, y, sample_weight=sample_weights)

@@ -45,8 +45,8 @@ def train_model_and_cache_predictions(games):
         games=games.copy(),
         model=model,
         init_bankroll=1000.0,
-        min_bet=5,
-        max_bet=100
+        min_bet=1,
+        max_bet=250
     )
     
     # Collect predictions during environment run
@@ -105,8 +105,8 @@ def objective_with_cached_predictions(trial, cached_data):
     
     # Simulate betting with cached predictions
     bankroll = 1000.0
-    min_bet = 5
-    max_bet = 100
+    min_bet = 1
+    max_bet = 250
     bets_placed = 0
     
     for idx in predictions.keys():
@@ -168,9 +168,11 @@ def main():
                        help='Force retrain even if cache exists')
     parser.add_argument('--study-name', type=str, default='fast_betting_opt',
                        help='Name of the optimization study')
-    
+    parser.add_argument('--end-year', type=int, default=2018,
+                       help='Last year (inclusive) to include in the simulation; default 2018 stops before 2019')
+
     args = parser.parse_args()
-    
+
     # Load or create cache
     if not args.retrain and os.path.exists(args.cache_file):
         print(f"Loading cached predictions from {args.cache_file}...")
@@ -178,7 +180,17 @@ def main():
             cached_data = pickle.load(f)
         print(f"✓ Loaded {len(cached_data['predictions'])} cached predictions\n")
     else:
-        games = pd.read_csv("../data/games.csv", index_col=0, parse_dates=["Date", "Open"])
+        games = pd.read_csv("../data/round2_games.csv", index_col=0, parse_dates=["Date", "Open"])
+
+        # Filter games to stop before the year after --end-year (inclusive end-year)
+        if 'Date' in games.columns:
+            original_count = len(games)
+            games = games[games['Date'].dt.year <= args.end_year]
+            filtered_count = len(games)
+            print(f"Filtered games by end_year={args.end_year}: {original_count} -> {filtered_count} rows")
+        else:
+            print("Warning: 'Date' column not found in games CSV; --end-year filter skipped")
+
         cached_data = train_model_and_cache_predictions(games)
         
         # Save cache
@@ -186,7 +198,7 @@ def main():
         with open(args.cache_file, 'wb') as f:
             pickle.dump(cached_data, f)
         print(f"✓ Cached predictions saved\n")
-    
+
     # Setup storage for parallel execution
     storage = None
     if args.n_jobs != 1:
