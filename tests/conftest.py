@@ -17,6 +17,9 @@ import pandas as pd
 import pytest
 import torch
 
+from qqh.environment import Environment
+from qqh.models import MODELS
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 ORIGINALS = ROOT / "originals"
@@ -52,3 +55,27 @@ def load_original(module: str):
         return importlib.import_module(module)
     finally:
         sys.path.remove(str(ORIGINALS))
+
+
+# Settings that open the models' betting windows, so that they bet on the early test seasons.
+OPEN_WINDOW = {
+    "hybrid": {"start_season": None},
+    "simple-rolling": {"start_season": None, "end_season": None},
+}
+
+
+def run(model, games: pd.DataFrame):
+    return Environment(games, model, init_bankroll=1000, min_bet=1, max_bet=250).run()
+
+
+@pytest.fixture(scope="session")
+def package_runs(early_seasons):
+    """Each package model's run on the early seasons, computed once per test session."""
+    cache = {}
+
+    def get(name):
+        if name not in cache:
+            cache[name] = run(MODELS[name].build(**OPEN_WINDOW.get(name, {})), early_seasons)
+        return cache[name]
+
+    return get

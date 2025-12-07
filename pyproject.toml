@@ -48,3 +48,4 @@ select = ["E", "F", "W", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 # Thread counts are set in the environment before numpy and torch are imported.
 "tests/conftest.py" = ["E402"]
+"tools/replay.py" = ["E402"]
