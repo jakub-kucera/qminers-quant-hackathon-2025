@@ -1,0 +1,50 @@
+[project]
+name = "qqh"
+version = "1.0.0"
+description = "Ice-hockey betting models from the Qminers Quant Hackathon 2025"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+# The versions hyperion (the organisers' evaluation server) ran.
+dependencies = [
+  "numpy==1.26.4",
+  "pandas==2.2.2",
+  "scikit-learn==1.5.1",
+  "scipy==1.12.0",
+  "torch==2.4.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+analysis = ["matplotlib>=3.9", "optuna>=4.0"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["originals"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Thread counts are set in the environment before numpy and torch are imported.
+"tests/conftest.py" = ["E402"]
