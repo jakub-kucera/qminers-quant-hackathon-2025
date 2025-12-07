@@ -192,14 +192,6 @@ class Model(BaseModel):
         max_bet = summary.iloc[0]["Max_bet"]
         bankroll = summary.iloc[0]["Bankroll"]
         
-        # Stop betting if bankroll exceeds $1,400 (profit-taking strategy)
-        if bankroll > 1400:
-            return pd.DataFrame(
-                data=np.zeros((len(opps), 3)),
-                columns=["BetH", "BetD", "BetA"],
-                index=opps.index
-            )
-        
         bets = pd.DataFrame(
             data=np.zeros((len(opps), 3)),
             columns=["BetH", "BetD", "BetA"],
