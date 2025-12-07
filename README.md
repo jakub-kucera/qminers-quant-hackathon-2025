@@ -4,6 +4,11 @@ Our team's models from the [Qminers Quant Hackathon 2025](https://github.com/IDA
 a betting bot for an anonymised ice-hockey league, run day by day against a bookmaker over
 seasons it has never seen.
 
+Our main model is not original. It ports the 2024 winners' basketball solution,
+[qminers-24](https://github.com/AdamBobocky/qminers-24), to hockey and refits it on this year's
+data. Our own parts are the hockey adjustments, the Poisson and rolling-form signals, Přemysl's
+staking rule in the hybrid, the tuning, and the replay and post-mortem after the event.
+
 The hackathon code is kept as it was (`originals/`) and rebuilt as a small package (`qqh/`)
 that places exactly the same bets, which the tests check stake by stake. Every model is then
 replayed on every round of the competition, from the data the organisers published afterwards.
@@ -47,6 +52,10 @@ file with a `Model` class, run on one CPU with 5 GB of memory.
 
 ## The models
 
+The ensemble follows the design of qminers-24. Five of its seven signals (Pythagorean
+expectation, four factors, margin ratings, fatigue and Elo) are adapted from it; the Poisson and
+rolling-form signals are ours.
+
 ```mermaid
 flowchart LR
     games[finished games] --> signals
@@ -68,7 +77,7 @@ flowchart LR
 
 | Model | By | What it does | Submitted |
 |---|---|---|---|
-| `ensemble` | Jakub | the seven signals stacked by a multinomial logistic regression, fractional Kelly | |
+| `ensemble` | Jakub, ported from qminers-24 | the seven signals stacked by a multinomial logistic regression, fractional Kelly | |
 | `hybrid` | Jakub, Přemysl | the ensemble's probabilities with Pepe's confidence-weighted Kelly | qualification, finals round 2 |
 | `hybrid-retuned` | Jakub, Přemysl | the hybrid retuned later on the finals day | |
 | `bookie-rookie` | Jakub, Přemysl | the hybrid tuned for the Bookie Rookie task | Bookie Rookie |
@@ -109,10 +118,10 @@ Copilot's coding agent from our prompts, and the history shows which.
 
 ## Credits
 
+- **The 2024 winners'** [qminers-24](https://github.com/AdamBobocky/qminers-24): the ensemble, our
+  main model, is a port of their basketball solution. Its design and the Pythagorean,
+  four-factor, margin-rating, fatigue and Elo signals are adapted from it.
 - **Team:** Jakub Kucera, Marek Vedral, Přemysl Pilař.
-- **The 2024 winners'** [qminers-24](https://github.com/AdamBobocky/qminers-24): the ensemble's
-  design and the Pythagorean, four-factor, margin-rating, fatigue and Elo signals are adapted
-  from their basketball solution.
 - **The organisers**, Qminers and CTU FEL: the task, the evaluation loop that
   `qqh/environment.py` reproduces, and the data, which stays in
   [their repository](https://github.com/IDA-CTU/QQH2025).
