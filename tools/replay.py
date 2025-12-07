@@ -30,6 +30,7 @@ RESULTS = Path(__file__).resolve().parent.parent / "results"
 # Settings changed from the models' presets so that they bet in every round.
 WHAT_IF = {
     "hybrid": {"start_season": None},
+    "hybrid-retuned": {"start_season": None},
     "simple-rolling": {"end_season": None},
 }
 

@@ -1,0 +1,9 @@
+model,bets,staked,profit,roi_on_stake,z
+ensemble,174,2211.18,280.31,0.127,1.56
+hybrid,2,327.0,-130.02,-0.398,-0.84
+hybrid-retuned,13,1580.0,584.98,0.37,1.42
+bookie-rookie,184,11995.0,1278.72,0.107,0.73
+simple-rolling,97,20405.0,-1521.58,-0.075,-0.85
+underdog-sniper,4,2000.0,-2000.0,-1.0,-1.3
+market-residual,1424,11689.08,-2997.63,-0.256,-3.72
+no-bets,0,0.0,0.0,,
