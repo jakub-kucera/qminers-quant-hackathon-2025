@@ -1,0 +1,22 @@
+study,trials,completed,best_value,first_trial,last_trial
+hockey_model_optimization,5,1,-0.65,2025-11-17 08:52,2025-11-17 09:04
+bookie_rookie_optimization,50,12,,2025-11-26 00:57,2025-11-26 00:58
+optimize_hybrid_comprehensive_27_11_0_50,9,5,,2025-11-27 00:50,2025-11-27 00:50
+optimize_hybrid_comprehensive_27_11_0_59,4,0,,2025-11-27 00:59,
+optimize_hybrid_comprehensive_27_11_1_20,8,0,,2025-11-27 01:20,
+optimize_hybrid_comprehensive_27_11_2_23,26,22,157.66,2025-11-27 01:23,2025-11-27 10:12
+hybrid_opt_with_trial103,309,308,1338.8,2025-11-27 20:37,2025-11-29 08:42
+simple_rolling_fast_optimization_skip,1004,1000,0.0,2025-12-05 10:34,2025-12-05 10:49
+simple_rolling_fast_optimization_skip_fix,500,500,200.0,2025-12-05 10:54,2025-12-05 10:56
+simple_rolling_fast_optimization_skip_fix_elo,500,500,200.0,2025-12-05 14:09,2025-12-05 14:11
+simple_rolling_fast_optimization_skip_fix_elo_2,1000,1000,200.0,2025-12-05 17:57,2025-12-05 18:01
+simple_rolling_fast_optimization_skip_fix_elo_2_no_sog,1000,1000,309.0,2025-12-05 20:31,2025-12-05 20:36
+simple_rolling_fast_optimization_skip_fix_elo_2_from_2009,1043,1043,494.0,2025-12-05 21:49,2025-12-05 21:51
+simple_rolling_fast_optimization_skip_fix_elo_2_from_2009_f_01,1000,1000,478.0,2025-12-06 10:11,2025-12-06 10:15
+optimize_hybrid_comprehensive__finale_part_1_fixed_ods,13,12,2329.26,2025-12-06 11:32,2025-12-06 12:56
+optimize_hybrid_comprehensive__finale_part_2_fixed_ods,5,3,0.0,2025-12-06 13:20,2025-12-06 13:31
+optimize_hybrid_comprehensive__finale_part_2_fixed_ods,13,12,186.47,2025-12-06 13:49,2025-12-06 14:25
+optimize_hybrid_comprehensive__finale_part_3_fixed_ods,11,10,47.65,2025-12-06 14:27,2025-12-06 15:00
+simple_rolling_fast_optimization_round2_data_from_2015,500,500,394.0,2025-12-06 15:03,2025-12-06 15:04
+simple_rolling_fast_optimization_round1_data_from_2015,500,500,1085.0,2025-12-06 15:10,2025-12-06 15:10
+simple_rolling_fast_optimization_round2_data_from_2015_to_2018,500,500,606.46,2025-12-06 15:15,2025-12-06 15:16
