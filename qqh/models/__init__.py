@@ -37,6 +37,10 @@ MODELS = {
         HybridModel, "FINALS_ROUND_2", "Jakub Kucera, Přemysl Pilař",
         "the ensemble's probabilities with Pepe's confidence-weighted Kelly",
     ),
+    "hybrid-retuned": Entry(
+        HybridModel, "FINALS_RETUNED", "Jakub Kucera, Přemysl Pilař",
+        "the hybrid retuned later on the finals day, never submitted",
+    ),
     "bookie-rookie": Entry(
         HybridModel, "BOOKIE_ROOKIE", "Jakub Kucera, Přemysl Pilař",
         "the hybrid tuned for the Bookie Rookie task",

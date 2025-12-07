@@ -13,7 +13,8 @@ from qqh.environment import BET_COLS
 # model name -> (module in originals/, kwargs for the original matching conftest.OPEN_WINDOW)
 CASES = {
     "ensemble": ("model", {}),
-    "hybrid": ("model_hybrid", {"start_season": None}),
+    "hybrid": ("model_hybrid_round_2", {"start_season": None}),
+    "hybrid-retuned": ("model_hybrid", {"start_season": None}),
     "bookie-rookie": ("model_bookie_rookie", {}),
     "simple-rolling": ("model_simple_rolling", {"start_season": None, "end_year": None}),
     "underdog-sniper": ("model_underdog_sniper", {}),

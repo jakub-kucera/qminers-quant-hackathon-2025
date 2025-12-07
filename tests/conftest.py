@@ -60,6 +60,7 @@ def load_original(module: str):
 # Settings that open the models' betting windows, so that they bet on the early test seasons.
 OPEN_WINDOW = {
     "hybrid": {"start_season": None},
+    "hybrid-retuned": {"start_season": None},
     "simple-rolling": {"start_season": None, "end_season": None},
 }
 

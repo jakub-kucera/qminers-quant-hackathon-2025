@@ -31,9 +31,44 @@ _PREDICTION_KEYS = (
     "rolling_window_long",
 )
 
-# Finals, round 2. Optuna's trial 11 on the finals' training data (seasons 2010-2014, in
-# sample), betting only from season 2017, the first of the round.
+# Finals, round 2, as committed at 12:04 on the finals day: Optuna's trial 6 on the finals'
+# training data (seasons 2010-2014, in sample). Most likely the round-2 upload: replayed on
+# round 2 it places no bets, as the evaluation server reported.
 FINALS_ROUND_2 = dict(
+    ensemble_required_n=700,
+    ensemble_retrain_freq=350,
+    pythagorean_power=1.2654047896737288,
+    pythagorean_regularization=35,
+    pythagorean_decay=0.9914605630145961,
+    four_factor_required_n=400,
+    four_factor_decay=0.9906944262706785,
+    gradient_descent_epochs=15,
+    gradient_descent_min_games=500,
+    exhaustion_b2b_penalty=1.6122378907451644,
+    exhaustion_road_penalty=0.3098116140922794,
+    elo_k_base=25,
+    elo_home_advantage=40,
+    elo_margin_cap=5,
+    poisson_regularization=3.9821364645005977,
+    poisson_decay=0.9962778533599858,
+    rolling_window_short=3,
+    rolling_window_med=14,
+    rolling_window_long=22,
+    min_edge=0.07642150043685061,
+    kelly_fraction=0.5577068347747918,
+    value_multiplier=3.8955878786984246,
+    confidence_threshold=0.6058143644490847,
+    max_bet_fraction=0.2707878837511299,
+    max_total_exposure=0.9303174396487595,
+    weight_separation=0.4938394813836171,
+    weight_certainty=0.4440286639439308,
+    weight_form=0.3017698014588763,
+    start_season=2010,
+)
+
+# Retuned later on the finals day (the last version on disk): Optuna's trial 11 on the same
+# data, betting only from season 2017. Probably never submitted.
+FINALS_RETUNED = dict(
     ensemble_required_n=700,
     ensemble_retrain_freq=350,
     pythagorean_power=1.0468184350832361,
