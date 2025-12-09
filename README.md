@@ -1,8 +1,15 @@
-# Betting on ice hockey: QQH 2025
+# Ice-hockey betting bot: Qminers Quant Hackathon 2025
 
-Our team's models from the [Qminers Quant Hackathon 2025](https://github.com/IDA-CTU/QQH2025):
-a betting bot for an anonymised ice-hockey league, run day by day against a bookmaker over
-seasons it has never seen.
+Our team's models from the [Qminers Quant Hackathon 2025](https://qqh.fel.cvut.cz/): a betting
+bot for an anonymised ice-hockey league, run day by day against a bookmaker over seasons it has
+never seen. The hackathon, in its fourth year, is run by the algorithmic-trading firm Qminers
+with the Intelligent Data Analysis group at CTU FEL, for university and high-school students. It
+has two stages: an online qualification in November, then a one-day final in Prague for the 20
+best teams.
+
+**In short:** we qualified for the finals from about 120 teams and finished 8th of 20. After the
+event I rebuilt the code as a tested package, replayed every model on the finals data and wrote a
+post-mortem.
 
 Our main model is not original. It ports the 2024 winners' basketball solution,
 [qminers-24](https://github.com/AdamBobocky/qminers-24), to hockey and refits it on this year's
@@ -15,8 +22,8 @@ replayed on every round of the competition, from the data the organisers publish
 
 ## Results
 
-- **Qualification** (online, about 100 teams): through to the finals, with the hybrid model
-  below as our best.
+- **Qualification** (online, 7–28 November, about 120 teams): through to the finals, with the
+  hybrid model below as our best.
 - **Finals** (6 December 2025, 20 teams, three rounds): **8th, without placing a single bet.**
   In round 1 the hybrid's training ran longer than we had planned for on the server's one CPU,
   so a model that bets nothing went in. In round 2 the hybrid's thresholds let no game through.
@@ -35,6 +42,19 @@ convincing, the ensemble, made +280 on 174 bets, 1.6 standard deviations from wh
 would give. Marek's network is the exception the other way, losing on 1,424 bets at 3.7 standard
 deviations. The retuned hybrid's +542 in round 3 comes from four bets. The full tables, what went
 wrong in each round and what we would do differently: **[the post-mortem](docs/postmortem.md)**.
+
+## My part
+
+- **Porting the main model:** with a teammate, I ported qminers-24's ensemble to hockey through
+  GitHub Copilot's coding agent.
+- **The staking:** I combined the ensemble with Přemysl's staking rule into the hybrid, our
+  qualification model, and tuned a version of it for the Bookie Rookie task.
+- **Finals day:** I wrote the simple rolling model and the round-by-round submissions.
+- **After the event:** I rebuilt everything as the `qqh/` package, checked it stake by stake
+  against the original code, replayed every model on every round and wrote the post-mortem.
+
+Marek built the market-residual network and Přemysl the underdog sniper. Both are included
+as they left them.
 
 ## The task
 
@@ -122,6 +142,6 @@ Copilot's coding agent from our prompts, and the history shows which.
   main model, is a port of their basketball solution. Its design and the Pythagorean,
   four-factor, margin-rating, fatigue and Elo signals are adapted from it.
 - **Team:** Jakub Kucera, Marek Vedral, Přemysl Pilař.
-- **The organisers**, Qminers and CTU FEL: the task, the evaluation loop that
-  `qqh/environment.py` reproduces, and the data, which stays in
+- **The organisers**, Qminers and the Intelligent Data Analysis group at CTU FEL: the task, the
+  evaluation loop that `qqh/environment.py` reproduces, and the data, which stays in
   [their repository](https://github.com/IDA-CTU/QQH2025).
